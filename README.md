@@ -34,7 +34,7 @@ Compression factor $c$ is controlled by the `--layer_sizes` flag, which is a lis
 
 **Compression Factor from Layer Sizes Formula**
 
-$c = \frac{3*2^{3*(|\ell|-2)}}{\ell_{-1}}$
+$$c = \frac{3*2^{3*(|\ell|-2)}}{\ell_{-1}}$$
 
 * $\ell$ refers to the list passed in the `--layer_sizes` flag
 * $|\ell|$ is the length of layer sizes list
