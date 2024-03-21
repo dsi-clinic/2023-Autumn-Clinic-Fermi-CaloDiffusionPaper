@@ -188,3 +188,4 @@ The `-m all` flag runs all the evaluations of the CaloChallenge (plots, chi2 met
 See `evaluate.py` for more options
 
 # Contributors
+Josh Li   lijiaxin@uchicago.edu
