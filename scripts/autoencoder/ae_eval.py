@@ -50,6 +50,7 @@ parser.add_argument('--job_idx', default = -1, type = int, help = 'Split generat
 parser.add_argument('--debug', action='store_true', default=False, help='Debugging options')
 parser.add_argument('--binning_file', type=str, default=None, help='Path to binning file') # added to account for new file structure
 parser.add_argument('--save_folder_append', type=str, default=None, help='Optional text to append to training folder to separate outputs of training runs with the same config file')
+parser.add_argument('--save_folder_absolute', type=str, default=None, help='Optional path to use for training folder instead of default ..')
 parser.add_argument('--layer_sizes', type=int, nargs="+", default=None, help="Manual layer sizes input instead of from config file")
 
 flags = parser.parse_args()
@@ -102,6 +103,8 @@ if(flags.job_idx >= 0):
 
 if flags.sample:
     checkpoint_folder = '../ae_models/{}_{}/'.format(dataset_config['CHECKPOINT_NAME'],flags.model)
+    if flags.save_folder_absolute is not None: # Optionally replace this folder with whatever
+        checkpoint_folder = f"{flags.save_folder_absolute}{checkpoint_folder[2:]}"
     if flags.save_folder_append is not None:
         checkpoint_folder = f"{checkpoint_folder}{flags.save_folder_append}/"
     energies = None
@@ -264,7 +267,9 @@ if(not flags.sample):
     data_dict = {}
     for model in models:
         
-        checkpoint_folder = '../ae_models/{}_{}/'.format(dataset_config['CHECKPOINT_NAME'], model)
+        checkpoint_folder = '../ae_models/{}_{}/'.format(dataset_config['CHECKPOINT_NAME'],flags.model)
+        if flags.save_folder_absolute is not None: # Optionally replace this folder with whatever
+            checkpoint_folder = f"{flags.save_folder_absolute}{checkpoint_folder[2:]}"
         if flags.save_folder_append is not None:
             checkpoint_folder = f"{checkpoint_folder}{flags.save_folder_append}/"
              
