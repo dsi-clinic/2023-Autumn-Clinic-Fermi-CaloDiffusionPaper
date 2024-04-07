@@ -41,6 +41,7 @@ if __name__ == '__main__':
     parser.add_argument('--patience', type=int, default=25, help='Patience for early stopper')
     parser.add_argument('--min_delta', type=float, default=1e-5, help='Minimum loss change range for early stopper')
     parser.add_argument('--save_folder_append', type=str, default=None, help='Optional text to append to training folder to separate outputs of training runs with the same config file')
+    parser.add_argument('--save_folder_absolute', type=str, default=None, help='Optional path to use for training folder instead of default ..')
     parser.add_argument('--resnet_set', type=int, nargs="+", default=[0,1,2])
     parser.add_argument('--layer_sizes', type=int, nargs="+", default=None, help="Manual layer sizes input instead of from config file")
     parser.add_argument('--learning_rate', type=float, nargs="+", default=None, help="Manual learning rate input instead of from config file")
@@ -144,6 +145,8 @@ if __name__ == '__main__':
 
     del torch_data_tensor, torch_E_tensor, train_dataset, val_dataset
     checkpoint_folder = '../ae_models/{}_{}/'.format(dataset_config['CHECKPOINT_NAME'],flags.model)
+    if flags.save_folder_absolute is not None: # Optionally replace this folder with whatever
+        checkpoint_folder = f"{flags.save_folder_absolute}{checkpoint_folder[2:]}"
     if flags.save_folder_append is not None: # Optionally append another folder title
         checkpoint_folder = f"{checkpoint_folder}{flags.save_folder_append}/"
 

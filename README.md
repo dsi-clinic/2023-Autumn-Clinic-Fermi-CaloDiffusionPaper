@@ -186,5 +186,3 @@ python evaluate.py -i GENERATED_DATASET.h5 -r REFERENCE_DATASET.h5 -d DATASET_NU
 The `-m all` flag runs all the evaluations of the CaloChallenge (plots, chi2 metric, classifier metric, KPD/FPD metric).
 
 See `evaluate.py` for more options
-
-# Contributors
