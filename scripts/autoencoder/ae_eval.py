@@ -267,7 +267,7 @@ if(not flags.sample):
     data_dict = {}
     for model in models:
         
-        checkpoint_folder = '../ae_models/{}_{}/'.format(dataset_config['CHECKPOINT_NAME'],flags.model)
+        checkpoint_folder = '../ae_models/{}_{}/'.format(dataset_config['CHECKPOINT_NAME'], model)
         if flags.save_folder_absolute is not None: # Optionally replace this folder with whatever
             checkpoint_folder = f"{flags.save_folder_absolute}{checkpoint_folder[2:]}"
         if flags.save_folder_append is not None:
