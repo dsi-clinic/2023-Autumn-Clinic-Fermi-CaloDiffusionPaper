@@ -18,7 +18,7 @@ do
     eval $command
     for lr in "${learning_rate[@]}"
     do
-        sed -i '28s/.*/learning_rate='$lr'/' autoscript_DONOTMODIFY_ds$dataset.sh
+        sed -i '28s/.*/learning_rate='$lr'/' autoscript_ae_ds$dataset.sh
         sbatch_output=$(sbatch /net/projects/fermi-1/doug/sbatch_scripts/grey/autoscript_ae_ds$dataset.sh)
         echo $sbatch_output
     done
