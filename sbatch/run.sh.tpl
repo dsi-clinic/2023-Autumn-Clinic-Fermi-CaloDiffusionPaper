@@ -12,5 +12,5 @@
 #SBATCH --time=12:00:00
 ​
 source /home/${USER}/.bashrc
-conda activate env_name 
+source activate env_name 
 python3 run.py 
