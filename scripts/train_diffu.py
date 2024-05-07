@@ -142,7 +142,10 @@ if __name__ == '__main__':
         loader_train = torchdata.DataLoader(train_dataset, batch_size = batch_size, shuffle = True)
         loader_val = torchdata.DataLoader(val_dataset, batch_size = batch_size, shuffle = True)
 
-    del torch_data_tensor, torch_E_tensor, train_dataset, val_dataset
+    del torch_data_tensor, train_dataset, val_dataset
+    if(flags.model == "Diffu"):
+        del torch_E_tensor
+
     checkpoint_folder = '../models/{}_{}/'.format(dataset_config['CHECKPOINT_NAME'],flags.model)
     if flags.save_folder_append is not None: # optionally append another folder title
         checkpoint_folder = f"{checkpoint_folder}{flags.save_folder_append}/"
@@ -161,10 +164,6 @@ if __name__ == '__main__':
         model = CaloDiffu(shape, config=dataset_config, training_obj = training_obj, NN_embed = NN_embed, nsteps = dataset_config['NSTEPS'],
                 cold_diffu = cold_diffu, avg_showers = avg_showers, std_showers = std_showers, E_bins = E_bins ).to(device = device)
 
-        #sometimes save only weights, sometimes save other info
-        if('model_state_dict' in checkpoint.keys()): model.load_state_dict(checkpoint['model_state_dict'])
-        elif(len(checkpoint.keys()) > 1): model.load_state_dict(checkpoint)
-
     # Added a conditional statement, based off of flags.model, that runs the latent diffusion training pipeline to do the following three things:
     # Encode data into a latent space with autoencoder
     # Perform latent diffusion pipeline with encoded data
@@ -173,24 +172,24 @@ if __name__ == '__main__':
     elif(flags.model == "Latent_Diffu"):
         shape = dataset_config['SHAPE_PAD'][1:] if (not orig_shape) else dataset_config['SHAPE_ORIG'][1:]
         
-        checkpoint = torch.load(flags.model_loc, map_location = device)
+        ae_checkpoint = torch.load(flags.model_loc, map_location = device)
         
         # Instantiating autoencoder
         AE = CaloEnco(shape, config=dataset_config, training_obj='mean_pred', NN_embed=NN_embed, 
                                 nsteps=dataset_config['NSTEPS'], cold_diffu=False, avg_showers=None, 
                                 std_showers=None, E_bins=None, layer_sizes=flags.layer_sizes).to(device = device)
         
-        
-        if('model_state_dict' in checkpoint.keys()): AE.load_state_dict(checkpoint['model_state_dict'])
-        elif(len(checkpoint.keys()) > 1): AE.load_state_dict(checkpoint)
+        if('model_state_dict' in ae_checkpoint.keys()): AE.load_state_dict(ae_checkpoint['model_state_dict'])
+        elif(len(ae_checkpoint.keys()) > 1): AE.load_state_dict(ae_checkpoint)
         
         print("Encoding Data...")
         encoded_data = []
         for i, (E,data) in tqdm(enumerate(loader_encode, 0), unit="batch", total=len(loader_encode)):
             encoded_data += AE.encode(data, E).tolist()
-        print("Data Successfully Encoded")
         
         encoded_data = torch.tensor(encoded_data).to(device = device)
+        print("Data successfully encoded with shape:",encoded_data.shape)
+        
         # Standardizing encoded data to have mean = 0 and std = 1
         encoded_data = (encoded_data - torch.mean(encoded_data)) / torch.std(encoded_data)
                 
@@ -198,7 +197,9 @@ if __name__ == '__main__':
 
         nTrain = int(round(flags.frac * num_data))
         nVal = num_data - nTrain
-        train_dataset, val_dataset = torch.utils.data.random_split(encoded_data, [nTrain, nVal])
+        energies_encoded_data = torchdata.TensorDataset(torch_E_tensor, encoded_data)
+        del torch_E_tensor
+        train_dataset, val_dataset = torch.utils.data.random_split(energies_encoded_data, [nTrain, nVal])
         
         loader_train = torchdata.DataLoader(train_dataset, batch_size = batch_size, shuffle = True)
         loader_val = torchdata.DataLoader(val_dataset, batch_size = batch_size, shuffle = True)
@@ -214,6 +215,8 @@ if __name__ == '__main__':
         print("Model %s not supported!" % flags.model)
         exit(1)
 
+    if('model_state_dict' in checkpoint.keys()): model.load_state_dict(checkpoint['model_state_dict'])
+    elif(len(checkpoint.keys()) > 1): model.load_state_dict(checkpoint)
 
     os.system('cp CaloDiffu.py {}'.format(checkpoint_folder)) # bkp of model def
     os.system('cp models.py {}'.format(checkpoint_folder)) # bkp of model def
@@ -249,16 +252,12 @@ if __name__ == '__main__':
 
         model.train()
         
-        for i, data in tqdm(enumerate(loader_train, 0), unit="batch", total=len(loader_train)):
+        for i, (E,data) in tqdm(enumerate(loader_train, 0), unit="batch", total=len(loader_train)):
             model.zero_grad()
             optimizer.zero_grad()
 
-            if isinstance(data, tuple):
-                data = data[1].to(device = device)
-                E = data[0].to(device = device)
-            else:
-                data = data.to(device = device)
-                E = None
+            data = data.to(device = device)
+            E = E.to(device = device)
 
             t = torch.randint(0, model.nsteps, (data.size()[0],), device=device).long()
             
@@ -266,7 +265,6 @@ if __name__ == '__main__':
 
             if(cold_diffu): #cold diffusion interpolates from avg showers instead of pure noise
                 noise = model.gen_cold_image(E, cold_noise_scale, noise)
-            
             batch_loss = model.compute_loss(data, E, noise = noise, t = t, loss_type = loss_type, energy_loss_scale = energy_loss_scale)
             batch_loss.backward()
 
@@ -281,14 +279,10 @@ if __name__ == '__main__':
 
         val_loss = 0
         model.eval()
-        for i, vdata in tqdm(enumerate(loader_val, 0), unit="batch", total=len(loader_val)):
+        for i, (vE,vdata) in tqdm(enumerate(loader_val, 0), unit="batch", total=len(loader_val)):
             
-            if isinstance(vdata, tuple):
-                vdata = vdata[1].to(device = device)
-                vE = vdata[0].to(device = device)
-            else:
-                vdata = vdata.to(device = device)
-                vE = None
+            vdata = vdata.to(device = device)
+            vE = vE.to(device = device)
 
             t = torch.randint(0, model.nsteps, (vdata.size()[0],), device=device).long()
             noise = torch.randn_like(vdata)
