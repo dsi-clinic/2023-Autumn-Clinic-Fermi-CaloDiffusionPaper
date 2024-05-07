@@ -374,7 +374,7 @@ class CondUnet(nn.Module):
         data_shape = (-1,1,45,16,9),
         time_embed = True,
         cond_embed = True,
-        max_downsample = 0,
+        max_downsample = 2,
         is_latent = False 
     ):
         super().__init__()
@@ -395,9 +395,7 @@ class CondUnet(nn.Module):
         else:
             block_klass = partial(ResnetBlock, groups=resnet_block_groups, cylindrical = cylindrical)
 
-        # Time and energy embeddings
-        if self.is_latent is True: half_cond_dim = cond_dim
-        else: half_cond_dim = cond_dim // 2
+        half_cond_dim = cond_dim // 2
         
         time_layers = []
         

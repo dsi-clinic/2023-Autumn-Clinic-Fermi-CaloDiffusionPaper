@@ -31,13 +31,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--data_folder', default='/wclustre/cms_mlsim/denoise/CaloChallenge/', help='Folder containing data and MC files')
 parser.add_argument('--plot_folder', default='../plots', help='Folder to save results')
 parser.add_argument('--generated', '-g', default='', help='Generated showers')
-parser.add_argument('--model_loc', default='test', help='Location of model')
+parser.add_argument('--model_loc', default='test', help='Location of diffusion model')
 parser.add_argument('--ae_loc', default='test', help='Location of autoencoder')
-parser.add_argument('--diffu_loc', default='test', help='Location of diffu_model')
+#parser.add_argument('--diffu_loc', default='test', help='Location of diffu_model')
 parser.add_argument('--config', default='config_dataset2.json', help='Training parameters')
 parser.add_argument('--nevts', type=int,default=-1, help='Number of events to load')
 parser.add_argument('--batch_size', type=int, default=100, help='Batch size for generation')
-parser.add_argument('--model', default='Diffu', help='Diffusion model to load. Options are: Diffu, AE, all')
+parser.add_argument('--model', default='Diffu', help='Diffusion model to load. Options are: Diffu, AE, Latent_Diffu, all')
 parser.add_argument('--plot_label', default='', help='Add to plot')
 parser.add_argument('--frac', type=float,default=0.85, help='Fraction of total events used for training')
 parser.add_argument('--sample', action='store_true', default=False,help='Sample from learned model')
@@ -162,13 +162,12 @@ if flags.sample:
 
 
     if(flags.model == "AE"):
-        print("Loading AE from " + flags.model_loc)
+        print("Loading AE from " + flags.ae_loc)
         model = CaloAE(dataset_config['SHAPE_PAD'][1:], batch_size, config=dataset_config).to(device=device)
 
-        saved_model = torch.load(flags.model_loc, map_location = device)
+        saved_model = torch.load(flags.ae_loc, map_location = device)
         if('model_state_dict' in saved_model.keys()): model.load_state_dict(saved_model['model_state_dict'])
         elif(len(saved_model.keys()) > 1): model.load_state_dict(saved_model)
-        #model.load_state_dict(torch.load(flags.model_loc, map_location=device))
 
         generated = []
         for i,(E,d_batch) in enumerate(data_loader):
@@ -185,89 +184,119 @@ if flags.sample:
     # Perform sampling with encoded data
     # Decode latent space data (encoded) into its original shape and store it in a file
     
-    elif (flags.model == "Latent_Diffu"):
+    # elif (flags.model == "Latent_Diffu"):
         
-        ##### ENCODING DATA #####
+    #     ##### ENCODING DATA #####
         
-        print("Loading AE from:" + flags.ae_loc)
+    #     print("Loading AE from:" + flags.ae_loc)
         
+    #     shape = dataset_config['SHAPE_PAD'][1:] if (not orig_shape) else dataset_config['SHAPE_ORIG'][1:]
+        
+    #     AE = CaloEnco(shape, config=dataset_config, training_obj='mean_pred', NN_embed=NN_embed, 
+    #                             nsteps=dataset_config['NSTEPS'], cold_diffu=False, avg_showers=None, 
+    #                             std_showers=None, E_bins=None, layer_sizes=flags.layer_sizes).to(device = device)
+        
+    #     saved_model = torch.load(flags.ae_loc, map_location = device)
+    #     if('model_state_dict' in saved_model.keys()): AE.load_state_dict(saved_model['model_state_dict'])
+    #     elif(len(saved_model.keys()) > 1): AE.load_state_dict(saved_model)
+        
+    #     encoded = []
+    #     for i,(E,d_batch) in enumerate(data_loader):
+    #         E = E.to(device=device)
+    #         d_batch = d_batch.to(device=device)
+        
+    #         enc = AE.encode(x=d_batch, E=E).detach().cpu().numpy()
+    #         if(i == 0): encoded = enc
+    #         else: encoded = np.concatenate((encoded, enc))
+    #         del E, d_batch
+            
+    #     ##### DIFFUSION MODELING #####
+        
+    #     print("Loading Diffu model from:" + flags.diffu_loc)
+        
+    #     # Normalizing encoded data with mean = 0 and std = 1
+    #     encoded = torch.tensor(encoded).to(device = device)
+    #     encoded = (encoded - torch.mean(encoded)) / torch.std(encoded)
+
+    #     torch_dataset_encoded  = torchdata.TensorDataset(torch_E_tensor, encoded)
+    #     data_loader_encoded = torchdata.DataLoader(torch_dataset_encoded, batch_size = batch_size, shuffle = False)
+        
+    #     # Calculating the maximum number of times the diffusion forward passes can run
+    #     max_downsample = np.array(encoded.shape)[-3:].min()//2
+        
+    #     shape = encoded.shape[1:]
+        
+    #     model = CaloDiffu(shape, config=dataset_config, training_obj = training_obj, NN_embed = None, nsteps = dataset_config['NSTEPS'],
+    #             cold_diffu = cold_diffu, avg_showers = avg_showers, std_showers = std_showers, E_bins = E_bins,
+    #             max_downsample=max_downsample, is_latent = True).to(device = device)     
+                
+    #     saved_model = torch.load(flags.diffu_loc, map_location = device)
+    #     if('model_state_dict' in saved_model.keys()): model.load_state_dict(saved_model['model_state_dict'])
+    #     elif(len(saved_model.keys()) > 1): model.load_state_dict(saved_model)
+        
+    #     generated = []
+    #     start_time = time.time()
+    #     for i, d_batch in enumerate(data_loader_encoded):
+    #         d_batch = d_batch.to(device=device)
+
+    #         out = model.Sample(E = None, num_steps = sample_steps, cold_noise_scale = cold_noise_scale, sample_algo = flags.sample_algo,
+    #                 debug = flags.debug, sample_offset = flags.sample_offset)
+            
+    #         gen_diff = out
+            
+    #         if(i == 0): generated = gen_diff
+    #         else: generated = np.concatenate((generated, gen_diff))
+    #         del d_batch
+    
+    #     #### DECODING DATA #####
+        
+    #     decoded = []
+    #     for i, d_batch in enumerate(generated):
+    #         d_batch = d_batch.to(device=device)
+        
+    #         dec = AE.decode(x=d_batch, E=torch_E_tensor).detach().cpu().numpy()
+    #         if(i == 0): decoded = dec
+    #         else: decoded = np.concatenate((decoded, dec))
+    #         del d_batch    
+
+    #     generated = decoded
+    #     end_time = time.time()
+    #     print("Total sampling time %.3f seconds" % (end_time - start_time))
+        
+
+    elif(flags.model == "Diffu" or flags.model == "Latent_Diffu"):
+
         shape = dataset_config['SHAPE_PAD'][1:] if (not orig_shape) else dataset_config['SHAPE_ORIG'][1:]
-        
-        AE = CaloEnco(shape, config=dataset_config, training_obj='mean_pred', NN_embed=NN_embed, 
-                                nsteps=dataset_config['NSTEPS'], cold_diffu=False, avg_showers=None, 
-                                std_showers=None, E_bins=None, layer_sizes=flags.layer_sizes).to(device = device)
-        
-        saved_model = torch.load(flags.ae_loc, map_location = device)
-        if('model_state_dict' in saved_model.keys()): AE.load_state_dict(saved_model['model_state_dict'])
-        elif(len(saved_model.keys()) > 1): AE.load_state_dict(saved_model)
-        
-        encoded = []
-        for i,(E,d_batch) in enumerate(data_loader):
+        max_downsample = 2
+
+        if(flags.model == "Latent_Diffu"):
+            print("Loading AE from:" + flags.ae_loc)
+                        
+            AE = CaloEnco(shape, config=dataset_config, training_obj='mean_pred', NN_embed=NN_embed, 
+                                    nsteps=dataset_config['NSTEPS'], cold_diffu=False, avg_showers=None, 
+                                    std_showers=None, E_bins=None, layer_sizes=flags.layer_sizes).to(device = device)
+            
+            saved_model = torch.load(flags.ae_loc, map_location = device)
+            if('model_state_dict' in saved_model.keys()): AE.load_state_dict(saved_model['model_state_dict'])
+            elif(len(saved_model.keys()) > 1): AE.load_state_dict(saved_model)
+
+            # We need the shape of the encoded data to initialize the diffusion model so we encode a sample and check its shape
+            E, d_batch = list(data_loader)[0]
             E = E.to(device=device)
             d_batch = d_batch.to(device=device)
-        
-            enc = AE.encode(x=d_batch, E=E).detach().cpu().numpy()
-            if(i == 0): encoded = enc
-            else: encoded = np.concatenate((encoded, enc))
-            del E, d_batch
-            
-        ##### DIFFUSION MODELING #####
-        
-        print("Loading Diffu model from:" + flags.diffu_loc)
-        
-        # Normalizing encoded data with mean = 0 and std = 1
-        encoded = torch.tensor(encoded).to(device = device)
-        encoded = (encoded - torch.mean(encoded)) / torch.std(encoded)
-        
-        # Calculating the maximum number of times the diffusion forward passes can run
-        max_downsample = np.array(encoded.shape)[-3:].min()//2
-        
-        shape = encoded.shape[1:]
-        
-        model = CaloDiffu(shape, config=dataset_config, training_obj = training_obj, NN_embed = None, nsteps = dataset_config['NSTEPS'],
-                cold_diffu = cold_diffu, avg_showers = avg_showers, std_showers = std_showers, E_bins = E_bins,
-                max_downsample=max_downsample, is_latent = True).to(device = device)     
-                
-        saved_model = torch.load(flags.diffu_loc, map_location = device)
-        if('model_state_dict' in saved_model.keys()): model.load_state_dict(saved_model['model_state_dict'])
-        elif(len(saved_model.keys()) > 1): model.load_state_dict(saved_model)
-        
-        generated = []
-        start_time = time.time()
-        for i, d_batch in enumerate(encoded):
-            d_batch = d_batch.to(device=device)
-
-            out = model.Sample(E = None, num_steps = sample_steps, cold_noise_scale = cold_noise_scale, sample_algo = flags.sample_algo,
-                    debug = flags.debug, sample_offset = flags.sample_offset)
-            
-            gen_diff = out
-            
-            if(i == 0): generated = gen_diff
-            else: generated = np.concatenate((generated, gen_diff))
-            del d_batch
+            encoded = AE.encode(x=d_batch, E=E).detach().cpu().numpy()
+            encoded = torch.tensor(encoded).to(device = device)
     
-        #### DECODING DATA #####
-        
-        decoded = []
-        for i, d_batch in enumerate(generated):
-            d_batch = d_batch.to(device=device)
-        
-            dec = AE.decode(x=d_batch, E=None).detach().cpu().numpy()
-            if(i == 0): decoded = dec
-            else: decoded = np.concatenate((decoded, dec))
-            del d_batch    
+            # Calculating the maximum number of times the diffusion forward passes can run
+            max_downsample = np.array(encoded.shape)[-3:].min()//2
+            shape = encoded.shape[1:]
+            del E, d_batch, encoded
 
-        generated = decoded
-        end_time = time.time()
-        print("Total sampling time %.3f seconds" % (end_time - start_time))
-        
-
-    elif(flags.model == "Diffu"):
         print("Loading Diffu model from " + flags.model_loc)
 
-        shape = dataset_config['SHAPE_PAD'][1:] if (not orig_shape) else dataset_config['SHAPE_ORIG'][1:]
-        model = CaloDiffu(shape, config=dataset_config , training_obj = training_obj,NN_embed = NN_embed, nsteps = sample_steps,
-                cold_diffu = cold_diffu, avg_showers = avg_showers, std_showers = std_showers, E_bins = E_bins ).to(device = device)
+        model = CaloDiffu(shape, config=dataset_config , training_obj = training_obj, NN_embed = (None if flags.model == "Latent_Diffu" else NN_embed),
+                nsteps = sample_steps, cold_diffu = cold_diffu, avg_showers = avg_showers, std_showers = std_showers, E_bins = E_bins,
+                max_downsample = max_downsample, is_latent = (flags.model == "Latent_Diffu") ).to(device = device)  
 
         saved_model = torch.load(flags.model_loc, map_location = device)
         if('model_state_dict' in saved_model.keys()): model.load_state_dict(saved_model['model_state_dict'])
@@ -300,6 +329,24 @@ if flags.sample:
             if(i == 0): generated = gen
             else: generated = np.concatenate((generated, gen))
             del E, d_batch
+
+        if(flags.model == "Latent_Diffu"):
+
+            encoded = torch.tensor(generated).to(device = device)
+
+            torch_dataset_encoded  = torchdata.TensorDataset(torch_E_tensor, encoded)
+            data_loader_encoded = torchdata.DataLoader(torch_dataset_encoded, batch_size = batch_size, shuffle = False)
+
+            print('Decoding Generated Latent Representations')
+            generated = []
+            for i, (E,d_batch) in enumerate(generated):
+                d_batch = d_batch.to(device=device)
+            
+                dec = AE.decode(x=d_batch, E=E).detach().cpu().numpy()
+                if(i == 0): generated = dec
+                else: generated = np.concatenate((generated, dec))
+                del d_batch
+
         end_time = time.time()
         print("Total sampling time %.3f seconds" % (end_time - start_time))
         
@@ -313,7 +360,7 @@ if flags.sample:
 
     # Moved histogram generation out of conditional statement so we will always see it
     fout_ex = '{}/{}_{}_norm_voxels.{}'.format(flags.plot_folder,dataset_config['CHECKPOINT_NAME'],flags.model, plt_exts[0])
-    make_histogram([decoded.reshape(-1), data.reshape(-1)], ['Diffu', 'Geant4'], ['blue', 'black'], xaxis_label = 'Normalized Voxel Energy', 
+    make_histogram([generated.reshape(-1), data.reshape(-1)], ['Diffu', 'Geant4'], ['blue', 'black'], xaxis_label = 'Normalized Voxel Energy', 
                     num_bins = 40, normalize = True, fname = fout_ex)
 
     generated,energies = utils.ReverseNorm(generated ,e=energies, # REMOVED [:NEVTS] B/C WAS TRUNCATING DATA BY 1 AND PREVENTING BROADCASTING
@@ -339,16 +386,16 @@ if flags.sample:
         else:
             with h5.File(mask_file,"r") as h5f:
                 mask = h5f['mask'][:]
-        decoded = decoded*(np.reshape(mask,(1,-1))==0)
+        generated = generated*(np.reshape(mask,(1,-1))==0)
     
-    if(flags.decoded == ""):
-        fout = os.path.join(checkpoint_folder,'decoded_generated_{}_{}{}.h5'.format(dataset_config['CHECKPOINT_NAME'],flags.model, job_label))
+    if(flags.generated == ""):
+        fout = os.path.join(checkpoint_folder,'generated_{}_{}{}.h5'.format(dataset_config['CHECKPOINT_NAME'],flags.model, job_label))
     else:
-        fout = flags.decoded
+        fout = flags.generated
 
     print("Creating " + fout)
     with h5.File(fout,"w") as h5f:
-        dset = h5f.create_dataset("showers", data=1000*np.reshape(decoded,(decoded.shape[0],-1)), compression = 'gzip')
+        dset = h5f.create_dataset("showers", data=1000*np.reshape(generated,(generated.shape[0],-1)), compression = 'gzip')
         dset = h5f.create_dataset("incident_energies", data=1000*energies, compression = 'gzip')
 
 
@@ -356,7 +403,7 @@ if(not flags.sample):
 
     geom_conv = None
     if(dataset_num <= 1):
-        bins = XMLHandler(dataset_config['PART_TYPE'], flags.binning_file)
+        bins = XMLHandler(dataset_config['PART_TYPE'], flags.binning_file if flags.binning_file is not None else dataset_config['BIN_FILE'])
         geom_conv = GeomConverter(bins)
 
     def LoadSamples(fname):
@@ -377,7 +424,7 @@ if(not flags.sample):
     data_dict = {}
     for model in models:
         
-        checkpoint_folder = '../models/{}_{}/'.format(dataset_config['CHECKPOINT_NAME'], model) # DOUG removed double dot before /models
+        checkpoint_folder = '../models/{}_{}/'.format(dataset_config['CHECKPOINT_NAME'], model)
         if flags.save_folder_append is not None:
             checkpoint_folder = f"{checkpoint_folder}{flags.save_folder_append}/"
                 
@@ -502,7 +549,6 @@ if(not flags.sample):
             return ang_mean, ang_std
 
 
-
         def GetWidth(mean,mean2):
             width = np.ma.sqrt(mean2-mean**2).filled(0)
             return width
@@ -539,8 +585,6 @@ if(not flags.sample):
 
         return feed_dict_r2
 
-    
-    
     def AverageELayer(data_dict):
         
         def _preprocess(data):
@@ -556,9 +600,6 @@ if(not flags.sample):
         fig,ax0 = utils.PlotRoutine(feed_dict,xlabel='Layer number', ylabel= 'Mean dep. energy [GeV]', plot_label = flags.plot_label)
         for plt_ext in plt_exts: fig.savefig('{}/FCC_EnergyZ_{}_{}.{}'.format(flags.plot_folder,dataset_config['CHECKPOINT_NAME'],flags.model, plt_ext))
         return feed_dict
-
-
-
 
     def AverageER(data_dict):
 
@@ -582,10 +623,7 @@ if(not flags.sample):
         fig,ax0 = utils.PlotRoutine(feed_dict,xlabel=xlabel, ylabel= 'Mean Energy [GeV]', plot_label = flags.plot_label)
         for plt_ext in plt_exts: fig.savefig('{}/FCC_Energy{}_{}_{}.{}'.format(flags.plot_folder,f_str, dataset_config['CHECKPOINT_NAME'],flags.model, plt_ext))
         return feed_dict
-    
-    
-    
-      
+        
     def AverageEPhi(data_dict):
 
         def _preprocess(data):
@@ -610,9 +648,6 @@ if(not flags.sample):
         for plt_ext in plt_exts: fig.savefig('{}/FCC_Energy{}_{}_{}.{}'.format(flags.plot_folder, f_str, dataset_config['CHECKPOINT_NAME'],flags.model, plt_ext))
         return feed_dict
 
-
-
-
     def HistEtot(data_dict):
         def _preprocess(data):
             preprocessed = np.reshape(data,(data.shape[0],-1))
@@ -629,9 +664,6 @@ if(not flags.sample):
         for plt_ext in plt_exts: fig.savefig('{}/FCC_TotalE_{}_{}.{}'.format(flags.plot_folder,dataset_config['CHECKPOINT_NAME'],flags.model, plt_ext))
         return feed_dict
 
-
-
-  
     def HistNhits(data_dict):
 
         def _preprocess(data):
@@ -650,9 +682,6 @@ if(not flags.sample):
         for plt_ext in plt_exts: fig.savefig('{}/FCC_Nhits_{}_{}.{}'.format(flags.plot_folder,dataset_config['CHECKPOINT_NAME'],flags.model, plt_ext))
         return feed_dict
 
-
-
-
     def HistVoxelE(data_dict):
 
         def _preprocess(data):
@@ -668,8 +697,6 @@ if(not flags.sample):
         ax0.set_xscale("log")
         for plt_ext in plt_exts: fig.savefig('{}/FCC_VoxelE_{}_{}.{}'.format(flags.plot_folder,dataset_config['CHECKPOINT_NAME'],flags.model, plt_ext))
         return feed_dict
-
-
 
     def HistMaxELayer(data_dict):
 
@@ -687,9 +714,6 @@ if(not flags.sample):
         for plt_ext in plt_exts: fig.savefig('{}/FCC_MaxEnergyZ_{}_{}.{}'.format(flags.plot_folder,dataset_config['CHECKPOINT_NAME'],flags.model, plt_ext))
         return feed_dict
 
-
-
-
     def HistMaxE(data_dict):
 
         def _preprocess(data):
@@ -706,8 +730,6 @@ if(not flags.sample):
         fig,ax0 = utils.HistRoutine(feed_dict,xlabel= 'Max. voxel/Dep. energy',binning=binning,logy=True, plot_label = flags.plot_label)
         for plt_ext in plt_exts: fig.savefig('{}/FCC_MaxEnergy_{}_{}.{}'.format(flags.plot_folder,dataset_config['CHECKPOINT_NAME'],flags.model, plt_ext))
         return feed_dict
-        
-
 
     def plot_shower(shower, fout = "", title = "", vmax = 0, vmin = 0):
         #cmap = plt.get_cmap('PiYG')
@@ -734,8 +756,6 @@ if(not flags.sample):
 
         if(len(fout) > 0): fig.savefig(fout)
         return vmax, vmin
-
-
 
     def Plot_Shower_2D(data_dict):
         plt.rcParams['pcolor.shading'] ='nearest'
@@ -765,9 +785,6 @@ if(not flags.sample):
                     fout_ex = '{}/FCC_{}2D_{}_{}_{}_shower{}.{}'.format(flags.plot_folder,key,layer,dataset_config['CHECKPOINT_NAME'],flags.model, i, plt_exts[0])
                     title = "{} Shower {}, layer number {}".format(key, i, layer)
                     vmax, vmin = plot_shower(shower, fout = fout_ex, title = title, vmax = vmax, vmin = vmin)
-
-
-            
 
     do_cart_plots = (not dataset_config['CYLINDRICAL']) and dataset_config['SHAPE_PAD'][-1] == dataset_config['SHAPE_PAD'][-2]
     dataset_config['cartesian_plot'] = do_cart_plots
