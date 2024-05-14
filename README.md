@@ -190,6 +190,9 @@ See `evaluate.py` for more options
 # Contributors:
 
 Victor Brown
+
 Grey Singh
+
 Josh Li
+
 Aaron Zhang
