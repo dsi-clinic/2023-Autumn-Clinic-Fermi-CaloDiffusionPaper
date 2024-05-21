@@ -127,24 +127,25 @@ if __name__ == '__main__':
     else: data = np.reshape(data, (len(data), -1))
 
     num_data = data.shape[0]
+
     torch_data_tensor = torch.from_numpy(data).to(device = device) # creating a new tensor and stores it on the same memory from the original instantiated variables
     torch_E_tensor = torch.from_numpy(energies).to(device = device)
     del data
 
     torch_dataset  = torchdata.TensorDataset(torch_E_tensor, torch_data_tensor)
-    nTrain = int(round(flags.frac * num_data))
-    nVal = num_data - nTrain
-    train_dataset, val_dataset = torch.utils.data.random_split(torch_dataset, [nTrain, nVal])
 
     if(flags.model == "Latent_Diffu"):
-        loader_encode = torchdata.DataLoader(torch_dataset, batch_size = batch_size, shuffle = True)
+        loader_encode = torchdata.DataLoader(torch_dataset, batch_size = batch_size, shuffle = False)
     elif (flags.model == "Diffu"):
+        nTrain = int(round(flags.frac * num_data))
+        nVal = num_data - nTrain
+        train_dataset, val_dataset = torch.utils.data.random_split(torch_dataset, [nTrain, nVal])
         loader_train = torchdata.DataLoader(train_dataset, batch_size = batch_size, shuffle = True)
         loader_val = torchdata.DataLoader(val_dataset, batch_size = batch_size, shuffle = True)
 
-    del torch_data_tensor, train_dataset, val_dataset
+    del torch_data_tensor
     if(flags.model == "Diffu"):
-        del torch_E_tensor
+        del torch_E_tensor, train_dataset, val_dataset
 
     checkpoint_folder = '../models/{}_{}/'.format(dataset_config['CHECKPOINT_NAME'],flags.model)
     if flags.save_folder_append is not None: # optionally append another folder title
@@ -158,9 +159,9 @@ if __name__ == '__main__':
         print("Loading training checkpoint from %s" % checkpoint_path, flush = True)
         checkpoint = torch.load(checkpoint_path, map_location = device)
 
+    shape = dataset_config['SHAPE_PAD'][1:] if (not orig_shape) else dataset_config['SHAPE_ORIG'][1:]
 
     if(flags.model == "Diffu"):
-        shape = dataset_config['SHAPE_PAD'][1:] if (not orig_shape) else dataset_config['SHAPE_ORIG'][1:]
         model = CaloDiffu(shape, config=dataset_config, training_obj = training_obj, NN_embed = NN_embed, nsteps = dataset_config['NSTEPS'],
                 cold_diffu = cold_diffu, avg_showers = avg_showers, std_showers = std_showers, E_bins = E_bins ).to(device = device)
 
@@ -169,9 +170,7 @@ if __name__ == '__main__':
     # Perform latent diffusion pipeline with encoded data
     # Store trained latent diffusion model into directory
     
-    elif(flags.model == "Latent_Diffu"):
-        shape = dataset_config['SHAPE_PAD'][1:] if (not orig_shape) else dataset_config['SHAPE_ORIG'][1:]
-        
+    elif(flags.model == "Latent_Diffu"):        
         ae_checkpoint = torch.load(flags.model_loc, map_location = device)
         
         # Instantiating autoencoder
@@ -185,25 +184,35 @@ if __name__ == '__main__':
         print("Encoding Data...")
         encoded_data = []
         for i, (E,data) in tqdm(enumerate(loader_encode, 0), unit="batch", total=len(loader_encode)):
-            encoded_data += AE.encode(data, E).tolist()
+            E = E.to(device = device)
+            data = data.to(device = device)
+            enc = AE.encode(data, E).detach().cpu().numpy()
+            if(i == 0): encoded_data = enc
+            else: encoded_data = np.concatenate((encoded_data, enc))
+            del E, data
         
         encoded_data = torch.tensor(encoded_data).to(device = device)
         print("Data successfully encoded with shape:",encoded_data.shape)
         
         # Standardizing encoded data to have mean = 0 and std = 1
+        encoded_mean = torch.mean(encoded_data).item()
+        encoded_std = torch.std(encoded_data).item()
         encoded_data = (encoded_data - torch.mean(encoded_data)) / torch.std(encoded_data)
+        with open(checkpoint_folder+'encoded_mean_std.txt','w') as f:
+            f.write(f'encoded_mean={encoded_mean}\nencoded_std={encoded_std}')
                 
         max_downsample = np.array(encoded_data.shape)[-3:].min()//2
 
         nTrain = int(round(flags.frac * num_data))
         nVal = num_data - nTrain
         energies_encoded_data = torchdata.TensorDataset(torch_E_tensor, encoded_data)
-        del torch_E_tensor
         train_dataset, val_dataset = torch.utils.data.random_split(energies_encoded_data, [nTrain, nVal])
         
         loader_train = torchdata.DataLoader(train_dataset, batch_size = batch_size, shuffle = True)
         loader_val = torchdata.DataLoader(val_dataset, batch_size = batch_size, shuffle = True)
         
+        del torch_E_tensor, train_dataset, val_dataset
+
         shape = encoded_data.shape[1:]
         
         # Instantiating difussion model
@@ -260,7 +269,6 @@ if __name__ == '__main__':
             E = E.to(device = device)
 
             t = torch.randint(0, model.nsteps, (data.size()[0],), device=device).long()
-            
             noise = torch.randn_like(data)
 
             if(cold_diffu): #cold diffusion interpolates from avg showers instead of pure noise
@@ -280,7 +288,6 @@ if __name__ == '__main__':
         val_loss = 0
         model.eval()
         for i, (vE,vdata) in tqdm(enumerate(loader_val, 0), unit="batch", total=len(loader_val)):
-            
             vdata = vdata.to(device = device)
             vE = vE.to(device = device)
 

@@ -283,7 +283,7 @@ class CaloEnco(nn.Module):
         - encoded data transformed back into its original shape
         """
 
-        out = self.model.decode(self.add_RZPhi(x), E)
+        out = self.model.decode(x, E)
         if(self.NN_embed is not None): out = self.NN_embed.dec(out).to(x.device)
     
         return out
