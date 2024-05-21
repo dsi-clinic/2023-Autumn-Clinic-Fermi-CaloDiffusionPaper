@@ -106,7 +106,6 @@ class CaloDiffu(nn.Module):
         self.time_embed = config.get("TIME_EMBED", 'sin')
         self.E_embed = config.get("COND_EMBED", 'sin')
         cond_dim = config['COND_SIZE_UNET']
-        #if self.is_latent is True: cond_dim//=2
         layer_sizes = config['LAYER_SIZE_UNET']
         block_attn = config.get("BLOCK_ATTN", False)
         mid_attn = config.get("MID_ATTN", False)
@@ -144,7 +143,6 @@ class CaloDiffu(nn.Module):
             calo_summary_shape[0] = 1
             summary_shape = [calo_summary_shape, [1], [1]]
 
-
             self.model = CondUnet(cond_dim = cond_dim, out_dim = 1, channels = in_channels, layer_sizes = layer_sizes, block_attn = block_attn, mid_attn = mid_attn, 
                     cylindrical =  config.get('CYLINDRICAL', False), compress_Z = compress_Z, data_shape = calo_summary_shape,
                     cond_embed = (self.E_embed == 'sin'), time_embed = (self.time_embed == 'sin'), max_downsample = max_downsample, is_latent=self.is_latent )
@@ -153,15 +151,9 @@ class CaloDiffu(nn.Module):
             
             RZ_shape = self._data_shape
             
-            self.R_Z_inputs = False #config.get('R_Z_INPUT', False)
-            self.phi_inputs = False #config.get('PHI_INPUT', False)
+            self.R_Z_inputs = False
+            self.phi_inputs = False
 
-            in_channels = 1
-            '''
-            self.R_image, self.Z_image = create_R_Z_image(device, scaled = True, shape = RZ_shape)
-            self.phi_image = create_phi_image(device, shape = RZ_shape)
-            if(self.R_Z_inputs): in_channels = self._data_shape[0]
-            '''
             in_channels = self._data_shape[0]
 
             calo_summary_shape = list(copy.copy(RZ_shape))
@@ -173,8 +165,8 @@ class CaloDiffu(nn.Module):
 
             out_dim = in_channels
             
-            # Initializing conditional u-net model
-            self.model = CondUnet(cond_dim = cond_dim, out_dim = out_dim, channels = in_channels, layer_sizes = layer_sizes, block_attn = block_attn, mid_attn = mid_attn, 
+            # Initializing conditional u-net model (though for latent diffusion it is not actually a u-net)
+            self.model = CondUnet(cond_dim = cond_dim, out_dim = out_dim, channels = in_channels, layer_sizes = [in_channels] * len(layer_sizes), block_attn = block_attn, mid_attn = mid_attn, 
                     cylindrical =  config.get('CYLINDRICAL', False), compress_Z = compress_Z, data_shape = summary_shape,
                     cond_embed = (self.E_embed == 'sin'), time_embed = (self.time_embed == 'sin'), max_downsample = max_downsample, is_latent=self.is_latent)
             
@@ -230,7 +222,7 @@ class CaloDiffu(nn.Module):
             exit(1)
 
 
-    def compute_loss(self, data, energy=None, noise = None, t = None, loss_type = "l2", rnd_normal = None, energy_loss_scale = 1e-2):
+    def compute_loss(self, data, energy, noise = None, t = None, loss_type = "l2", rnd_normal = None, energy_loss_scale = 1e-2):
         if noise is None:
             noise = torch.randn_like(data)
 
@@ -320,14 +312,10 @@ class CaloDiffu(nn.Module):
                 return sigma
 
     def pred(self, x, E, t_emb):
-        if self.is_latent is True:
-          out = self.model(x, E, t_emb)
-          return out
-        else:
-          if(self.NN_embed is not None): x = self.NN_embed.enc(x).to(x.device)
-          out = self.model(self.add_RZPhi(x), E, t_emb)
-          if(self.NN_embed is not None): out = self.NN_embed.dec(out).to(x.device)
-          return out
+        if(self.NN_embed is not None): x = self.NN_embed.enc(x).to(x.device)
+        out = self.model(self.add_RZPhi(x), E, t_emb)
+        if(self.NN_embed is not None): out = self.NN_embed.dec(out).to(x.device)
+        return out
 
     def denoise(self, x, E, t_emb):
         pred = self.pred(x, E, t_emb)

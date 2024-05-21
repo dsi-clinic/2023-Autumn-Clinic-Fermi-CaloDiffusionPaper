@@ -32,6 +32,7 @@ parser.add_argument('--data_folder', default='/wclustre/cms_mlsim/denoise/CaloCh
 parser.add_argument('--plot_folder', default='../plots', help='Folder to save results')
 parser.add_argument('--generated', '-g', default='', help='Generated showers')
 parser.add_argument('--model_loc', default='test', help='Location of diffusion model')
+parser.add_argument('--encoded_mean_std_loc', default='', help='Location of encoded_mean_std.txt which has mean and std of latent representations for AE')
 parser.add_argument('--ae_loc', default='test', help='Location of autoencoder')
 #parser.add_argument('--diffu_loc', default='test', help='Location of diffu_model')
 parser.add_argument('--config', default='config_dataset2.json', help='Training parameters')
@@ -178,91 +179,6 @@ if flags.sample:
             if(i == 0): generated = gen
             else: generated = np.concatenate((generated, gen))
             del E, d_batch
-            
-    # Added a conditional statement, based off of flags.model, that runs the latent diffusion sampling pipeline to do the following three things:
-    # Encode data into a latent space with autoencoder
-    # Perform sampling with encoded data
-    # Decode latent space data (encoded) into its original shape and store it in a file
-    
-    # elif (flags.model == "Latent_Diffu"):
-        
-    #     ##### ENCODING DATA #####
-        
-    #     print("Loading AE from:" + flags.ae_loc)
-        
-    #     shape = dataset_config['SHAPE_PAD'][1:] if (not orig_shape) else dataset_config['SHAPE_ORIG'][1:]
-        
-    #     AE = CaloEnco(shape, config=dataset_config, training_obj='mean_pred', NN_embed=NN_embed, 
-    #                             nsteps=dataset_config['NSTEPS'], cold_diffu=False, avg_showers=None, 
-    #                             std_showers=None, E_bins=None, layer_sizes=flags.layer_sizes).to(device = device)
-        
-    #     saved_model = torch.load(flags.ae_loc, map_location = device)
-    #     if('model_state_dict' in saved_model.keys()): AE.load_state_dict(saved_model['model_state_dict'])
-    #     elif(len(saved_model.keys()) > 1): AE.load_state_dict(saved_model)
-        
-    #     encoded = []
-    #     for i,(E,d_batch) in enumerate(data_loader):
-    #         E = E.to(device=device)
-    #         d_batch = d_batch.to(device=device)
-        
-    #         enc = AE.encode(x=d_batch, E=E).detach().cpu().numpy()
-    #         if(i == 0): encoded = enc
-    #         else: encoded = np.concatenate((encoded, enc))
-    #         del E, d_batch
-            
-    #     ##### DIFFUSION MODELING #####
-        
-    #     print("Loading Diffu model from:" + flags.diffu_loc)
-        
-    #     # Normalizing encoded data with mean = 0 and std = 1
-    #     encoded = torch.tensor(encoded).to(device = device)
-    #     encoded = (encoded - torch.mean(encoded)) / torch.std(encoded)
-
-    #     torch_dataset_encoded  = torchdata.TensorDataset(torch_E_tensor, encoded)
-    #     data_loader_encoded = torchdata.DataLoader(torch_dataset_encoded, batch_size = batch_size, shuffle = False)
-        
-    #     # Calculating the maximum number of times the diffusion forward passes can run
-    #     max_downsample = np.array(encoded.shape)[-3:].min()//2
-        
-    #     shape = encoded.shape[1:]
-        
-    #     model = CaloDiffu(shape, config=dataset_config, training_obj = training_obj, NN_embed = None, nsteps = dataset_config['NSTEPS'],
-    #             cold_diffu = cold_diffu, avg_showers = avg_showers, std_showers = std_showers, E_bins = E_bins,
-    #             max_downsample=max_downsample, is_latent = True).to(device = device)     
-                
-    #     saved_model = torch.load(flags.diffu_loc, map_location = device)
-    #     if('model_state_dict' in saved_model.keys()): model.load_state_dict(saved_model['model_state_dict'])
-    #     elif(len(saved_model.keys()) > 1): model.load_state_dict(saved_model)
-        
-    #     generated = []
-    #     start_time = time.time()
-    #     for i, d_batch in enumerate(data_loader_encoded):
-    #         d_batch = d_batch.to(device=device)
-
-    #         out = model.Sample(E = None, num_steps = sample_steps, cold_noise_scale = cold_noise_scale, sample_algo = flags.sample_algo,
-    #                 debug = flags.debug, sample_offset = flags.sample_offset)
-            
-    #         gen_diff = out
-            
-    #         if(i == 0): generated = gen_diff
-    #         else: generated = np.concatenate((generated, gen_diff))
-    #         del d_batch
-    
-    #     #### DECODING DATA #####
-        
-    #     decoded = []
-    #     for i, d_batch in enumerate(generated):
-    #         d_batch = d_batch.to(device=device)
-        
-    #         dec = AE.decode(x=d_batch, E=torch_E_tensor).detach().cpu().numpy()
-    #         if(i == 0): decoded = dec
-    #         else: decoded = np.concatenate((decoded, dec))
-    #         del d_batch    
-
-    #     generated = decoded
-    #     end_time = time.time()
-    #     print("Total sampling time %.3f seconds" % (end_time - start_time))
-        
 
     elif(flags.model == "Diffu" or flags.model == "Latent_Diffu"):
 
@@ -270,6 +186,9 @@ if flags.sample:
         max_downsample = 2
 
         if(flags.model == "Latent_Diffu"):
+
+            assert flags.encoded_mean_std_loc != '', 'Error: You must pass as an argument (with flag --encoded_mean_std_loc) the location of encoded_mean_std.txt for latent diffusion'
+
             print("Loading AE from:" + flags.ae_loc)
                         
             AE = CaloEnco(shape, config=dataset_config, training_obj='mean_pred', NN_embed=NN_embed, 
@@ -333,13 +252,27 @@ if flags.sample:
         if(flags.model == "Latent_Diffu"):
 
             encoded = torch.tensor(generated).to(device = device)
+            print('Latent Representation Mean',torch.mean(encoded))
+            print('Latent Representation Std',torch.std(encoded))
+            print('Latent Representation Min',torch.min(encoded))
+            print('Latent Representation Max',torch.max(encoded))
+            
+            with open(flags.encoded_mean_std_loc,'r') as f:
+                encoded_mean_std = f.read().split('\n') #(f'encoded_mean={encoded_mean}\nencoded_std={encoded_std}')
+                encoded_mean = float(encoded_mean_std[0][13:])
+                encoded_std = float(encoded_mean_std[1][12:])
+            #(encoded_data - torch.mean(encoded_data)) / torch.std(encoded_data)
+            #    encoded = encoded * 2.3553035259246826 + 0.041101906448602676
+                encoded = (encoded * encoded_std) + encoded_mean
+            # encoded_mean=-0.041101906448602676 encoded_std=2.3553035259246826
 
             torch_dataset_encoded  = torchdata.TensorDataset(torch_E_tensor, encoded)
             data_loader_encoded = torchdata.DataLoader(torch_dataset_encoded, batch_size = batch_size, shuffle = False)
 
             print('Decoding Generated Latent Representations')
             generated = []
-            for i, (E,d_batch) in enumerate(generated):
+            for i, (E,d_batch) in enumerate(data_loader_encoded):
+                E = E.to(device=device)
                 d_batch = d_batch.to(device=device)
             
                 dec = AE.decode(x=d_batch, E=E).detach().cpu().numpy()
@@ -349,6 +282,10 @@ if flags.sample:
 
         end_time = time.time()
         print("Total sampling time %.3f seconds" % (end_time - start_time))
+        print('Generated Mean',np.mean(generated))
+        print('Generated Std',np.std(generated))
+        print('Generated Min',np.min(generated))
+        print('Generated Max',np.max(generated))
         
     elif(flags.model == "Avg"):
         #define model just for useful fns
@@ -363,7 +300,7 @@ if flags.sample:
     make_histogram([generated.reshape(-1), data.reshape(-1)], ['Diffu', 'Geant4'], ['blue', 'black'], xaxis_label = 'Normalized Voxel Energy', 
                     num_bins = 40, normalize = True, fname = fout_ex)
 
-    generated,energies = utils.ReverseNorm(generated ,e=energies, # REMOVED [:NEVTS] B/C WAS TRUNCATING DATA BY 1 AND PREVENTING BROADCASTING
+    generated,energies = utils.ReverseNorm(generated ,e=energies if nevts < 1 else energies[:nevts],
                                            shape=dataset_config['SHAPE'],
                                            logE=dataset_config['logE'],
                                            max_deposit=dataset_config['MAXDEP'],
