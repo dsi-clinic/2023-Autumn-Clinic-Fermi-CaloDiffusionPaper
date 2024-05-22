@@ -1,4 +1,4 @@
-d# CaloDiffusion official repository
+# CaloDiffusion official repository
 
 Repo for diffusion based calorimeter generation. Now includes pipelines to train and evaluate autoencoders and latent diffusion models for calorimeter generation.
   
