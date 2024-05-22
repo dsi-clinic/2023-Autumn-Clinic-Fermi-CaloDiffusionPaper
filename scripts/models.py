@@ -374,7 +374,7 @@ class CondUnet(nn.Module):
         data_shape = (-1,1,45,16,9),
         time_embed = True,
         cond_embed = True,
-        max_downsample = 0,
+        max_downsample = 2,
         is_latent = False 
     ):
         super().__init__()
@@ -387,17 +387,16 @@ class CondUnet(nn.Module):
 
         in_out = list(zip(layer_sizes[:-1], layer_sizes[1:])) 
         
-        if(not cylindrical): self.init_conv = nn.Conv3d(channels, layer_sizes[0], kernel_size = 3, padding = 1)
-        else: self.init_conv = CylindricalConv(channels, layer_sizes[0], kernel_size = 3, padding = 1)
+        if not self.is_latent:
+            if(not cylindrical): self.init_conv = nn.Conv3d(channels, layer_sizes[0], kernel_size = 3, padding = 1)
+            else: self.init_conv = CylindricalConv(channels, layer_sizes[0], kernel_size = 3, padding = 1)
 
         if use_convnext:
             block_klass = partial(ConvNextBlock, mult=convnext_mult, cylindrical = cylindrical)
         else:
             block_klass = partial(ResnetBlock, groups=resnet_block_groups, cylindrical = cylindrical)
 
-        # Time and energy embeddings
-        if self.is_latent is True: half_cond_dim = cond_dim
-        else: half_cond_dim = cond_dim // 2
+        half_cond_dim = cond_dim // 2
         
         time_layers = []
         
@@ -417,94 +416,109 @@ class CondUnet(nn.Module):
 
 
         # Layers
-        self.downs = nn.ModuleList([])
-        self.ups = nn.ModuleList([])
-        self.downs_attn = nn.ModuleList([])
-        self.ups_attn = nn.ModuleList([])
-        self.extra_upsamples = []
-        self.Z_even = []
-        num_resolutions = len(in_out)
+        if not self.is_latent:
+            self.downs = nn.ModuleList([])
+            self.ups = nn.ModuleList([])
+            self.downs_attn = nn.ModuleList([])
+            self.ups_attn = nn.ModuleList([])
+            self.extra_upsamples = []
+            self.Z_even = []
+            num_resolutions = len(in_out)
 
-        cur_data_shape = data_shape[-3:]
-        
-        cutoff = 1 if max_downsample >= 2 else max_downsample - 1
-        
-        for ind, (dim_in, dim_out) in enumerate(in_out):
+            cur_data_shape = data_shape[-3:]
             
-            is_last = True if ind > cutoff else False
-            if(not is_last):
-                extra_upsample_dim = [(cur_data_shape[0] + 1)%2, cur_data_shape[1]%2, cur_data_shape[2]%2]
-                Z_dim = cur_data_shape[0] if not compress_Z else math.ceil(cur_data_shape[0]/2.0)
-                cur_data_shape = (Z_dim, cur_data_shape[1] // 2, cur_data_shape[2] //2)
-                self.extra_upsamples.append(extra_upsample_dim)
+            for ind, (dim_in, dim_out) in enumerate(in_out):
+                is_last = (ind >= (num_resolutions - 1))
+                if(not is_last):
+                    extra_upsample_dim = [(cur_data_shape[0] + 1)%2, cur_data_shape[1]%2, cur_data_shape[2]%2]
+                    Z_dim = cur_data_shape[0] if not compress_Z else math.ceil(cur_data_shape[0]/2.0)
+                    cur_data_shape = (Z_dim, cur_data_shape[1] // 2, cur_data_shape[2] //2)
+                    self.extra_upsamples.append(extra_upsample_dim)
 
-            self.downs.append(
-                nn.ModuleList(
-                    [
-                        block_klass(dim_in, dim_out, cond_emb_dim=cond_dim),
-                        block_klass(dim_out, dim_out, cond_emb_dim=cond_dim),
-                        Downsample(dim_out, cylindrical, compress_Z = compress_Z) if not is_last else nn.Identity(),
-                    ]
+                self.downs.append(
+                    nn.ModuleList(
+                        [
+                            block_klass(dim_in, dim_out, cond_emb_dim=cond_dim),
+                            block_klass(dim_out, dim_out, cond_emb_dim=cond_dim),
+                            Downsample(dim_out, cylindrical, compress_Z = compress_Z) if not is_last else nn.Identity(),
+                        ]
+                    )
                 )
-            )
-            if(self.block_attn) : self.downs_attn.append(Residual(PreNorm(dim_out, LinearAttention(dim_out, cylindrical = cylindrical))))
+                if(self.block_attn) : self.downs_attn.append(Residual(PreNorm(dim_out, LinearAttention(dim_out, cylindrical = cylindrical))))
 
         mid_dim = layer_sizes[-1]
-        self.mid_block1 = block_klass(mid_dim, mid_dim, cond_emb_dim=cond_dim)
-        if(self.mid_attn): self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim, cylindrical = cylindrical)))
-        self.mid_block2 = block_klass(mid_dim, mid_dim, cond_emb_dim=cond_dim)
+        if not self.is_latent:
+            self.mid_block1 = block_klass(mid_dim, mid_dim, cond_emb_dim=cond_dim)
+            if(self.mid_attn): self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim, cylindrical = cylindrical)))
+            self.mid_block2 = block_klass(mid_dim, mid_dim, cond_emb_dim=cond_dim)
+        else:
+            self.mid_blocks = nn.ModuleList([])
+            if(self.mid_attn): self.mid_attn_blocks = nn.ModuleList([])
+            for ind in range(2 * (len(layer_sizes) - 1)):
+                self.mid_blocks.append(nn.ModuleList([block_klass(mid_dim, mid_dim, cond_emb_dim=cond_dim),block_klass(mid_dim, mid_dim, cond_emb_dim=cond_dim)]))
+                if(self.mid_attn): self.mid_attn_blocks.append(Residual(PreNorm(mid_dim, LinearAttention(mid_dim, cylindrical = cylindrical))))
 
-        ups = {}
-        if cutoff > -1: ups = {1} if cutoff == 0 else {0, 1}
-        for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
-            if ind in ups: extra_upsample = self.extra_upsamples.pop()
+        if not self.is_latent:
+            for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
+                is_last = (ind >= (num_resolutions - 1))
 
-            self.ups.append(
-                nn.ModuleList(
-                    [
-                        block_klass(dim_out * 2, dim_in, cond_emb_dim=cond_dim),
-                        block_klass(dim_in, dim_in, cond_emb_dim=cond_dim),
-                        Upsample(dim_in, extra_upsample, cylindrical, compress_Z = compress_Z) if ind in ups else nn.Identity(),
-                    ]
+                if(not is_last): 
+                    extra_upsample = self.extra_upsamples.pop()
+
+
+                self.ups.append(
+                    nn.ModuleList(
+                        [
+                            block_klass(dim_out * 2, dim_in, cond_emb_dim=cond_dim),
+                            block_klass(dim_in, dim_in, cond_emb_dim=cond_dim),
+                            Upsample(dim_in, extra_upsample, cylindrical, compress_Z = compress_Z) if not is_last else nn.Identity(),
+                        ]
+                    )
                 )
-            )
-            if(self.block_attn): self.ups_attn.append( Residual(PreNorm(dim_in, LinearAttention(dim_in, cylindrical = cylindrical))) )
+                if(self.block_attn): self.ups_attn.append( Residual(PreNorm(dim_in, LinearAttention(dim_in, cylindrical = cylindrical))) )
 
         if(not cylindrical): final_lay = nn.Conv3d(layer_sizes[0], out_dim, 1)
         else:  final_lay = CylindricalConv(layer_sizes[0], out_dim, 1)
-        self.final_conv = nn.Sequential( block_klass(layer_sizes[1], layer_sizes[0]),  final_lay )
+        if not self.is_latent: self.final_conv = nn.Sequential( block_klass(layer_sizes[1], layer_sizes[0]),  final_lay )
 
-    def forward(self, x, cond=None, time=None):
+    def forward(self, x, cond, time):
 
-        x = self.init_conv(x)
+        if not self.is_latent: x = self.init_conv(x)
         t = self.time_mlp(time)
+        c = self.cond_mlp(cond)
+        conditions = torch.cat([t,c], axis = -1)
 
-        if cond is not None: 
-            c = self.cond_mlp(cond)
-            conditions = torch.cat([t,c], axis = -1)
-        else: conditions = t
 
         h = []
 
         # Downsample
-        for i, (block1, block2, downsample) in enumerate(self.downs):
-            x = block1(x, conditions)
-            x = block2(x, conditions)
-            if(self.block_attn): x = self.downs_attn[i](x)
-            h.append(x)
-            x = downsample(x)
+        if not self.is_latent:
+            for i, (block1, block2, downsample) in enumerate(self.downs):
+                x = block1(x, conditions)
+                x = block2(x, conditions)
+                if(self.block_attn): x = self.downs_attn[i](x)
+                h.append(x)
+                x = downsample(x)
 
         # Bottleneck
-        x = self.mid_block1(x, conditions)
-        if(self.mid_attn): x = self.mid_attn(x)
-        x = self.mid_block2(x, conditions)
+        if not self.is_latent:
+            x = self.mid_block1(x, conditions)
+            if(self.mid_attn): x = self.mid_attn(x)
+            x = self.mid_block2(x, conditions)
+        else:
+            for i, (block1, block2) in enumerate(self.mid_blocks):
+                x = block1(x, conditions)
+                if(self.mid_attn): x = self.mid_attn_blocks[i](x)
+                x = block2(x, conditions)
+
 
         # Upsample
-        for i, (block1, block2, upsample) in enumerate(self.ups):
-            x = torch.cat((x, h.pop()), dim=1)
-            x = block1(x, conditions)
-            x = block2(x, conditions)
-            if(self.block_attn): x = self.ups_attn[i](x)
-            x = upsample(x)
+        if not self.is_latent:
+            for i, (block1, block2, upsample) in enumerate(self.ups):
+                x = torch.cat((x, h.pop()), dim=1)
+                x = block1(x, conditions)
+                x = block2(x, conditions)
+                if(self.block_attn): x = self.ups_attn[i](x)
+                x = upsample(x)
 
-        return self.final_conv(x)
+        return self.final_conv(x) if not self.is_latent else x
