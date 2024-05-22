@@ -15,6 +15,7 @@ from CaloEnco import *
 from scripts.utils import *
 from CaloChallenge.code.XMLHandler import *
 
+####not currently changing binning file
 
 def trim_file_path(cwd:str, num_back:int):
     '''
@@ -35,14 +36,14 @@ parser.add_argument('-c', '--config', default='/net/projects/fermi-1/doug/2023-A
 parser.add_argument('--nevts', type=int,default=-1, help='Number of events to load')
 parser.add_argument('--binning_file', type=str, default='/net/projects/fermi-1/doug/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/CaloChallenge/code/binning_dataset_2.xml')
 parser.add_argument('--model_loc', default='/net/projects/fermi-1/doug/ae_models/dataset2_AE/downsample_2_8_hrs/final.pth', help='Location of model')
-parser.add_argument('--layer_sizes', type=int, nargs="+", default=None, help="Manual layer sizes input instead of from config file")
+# parser.add_argument('--layer_sizes', type=str, default=None, help="Manual layer sizes input instead of from config file")
 
 flags = parser.parse_args()
 
 cwd = __file__
 calo_challenge_dir = trim_file_path(cwd=cwd, num_back=3)
 sys.path.append(calo_challenge_dir)
-print(calo_challenge_dir)
+# print(calo_challenge_dir)
 
 dataset_config = LoadJson(flags.config)
 
@@ -51,6 +52,42 @@ dataset_num = dataset_config.get('DATASET_NUM', 2)
 shower_embed = dataset_config.get('SHOWER_EMBED', '')
 orig_shape = ('orig' in shower_embed)
 batch_size = dataset_config['BATCH']
+
+##############################################################
+def find_layer_sizes(model_loc):
+
+    layer_sizes_info = ""
+    model_loc = model_loc.split('/')
+    for i,val in enumerate(model_loc):
+        if '.pth' in val:
+            layer_sizes_info = model_loc[i-1]
+            break
+    
+    if layer_sizes_info.startswith('static'):
+        layer_sizes = layer_sizes_info[len('static')+1:len('static')+1+11]
+    else:
+        layer_sizes = 'default'
+
+    layer_sizes_enum_dict = {'default': 'default', 
+                        '32_32_32_32': '4x32', 
+                        '16_16_16_16': '4x16', 
+                        '16_16_32_32': '2x16_2x32'}
+    
+
+    layer_sizes_layers_dict = {'default': {'raw_batch': (4500000, -1), 'encoded': (307200000, -1)}, 
+                        '32_32_32_32': {'raw_batch': (44528000, -1), 'encoded': (108416000, -1)}, 
+                        '16_16_16_16': {'raw_batch': (4500000, -1), 'encoded': (307200000, -1)}, 
+                        '16_16_32_32': {'raw_batch': (4500000, -1), 'encoded': (307200000, -1)}}
+
+    dict_info = [layer_sizes_enum_dict[layer_sizes], layer_sizes_layers_dict[layer_sizes]]
+    if layer_sizes == 'default':
+        return dict_info + [None] 
+    return dict_info + [list(map(int, layer_sizes.split('_')))]
+
+layer_sizes_name, layer_sizes_layers, layer_sizes = find_layer_sizes(flags.model_loc)
+print(f'layer sizes: {layer_sizes}')
+##############################################################
+
 
 
 data = []
@@ -109,7 +146,10 @@ torch_E_tensor = torch.from_numpy(energies)
 
 # SAVE DATA AND E as npz
 
-np.savez('/data_for_latent/raw_dataset.npz', data=torch_data_tensor, E=torch_E_tensor) #Save File 
+
+cwd = os.getcwd()
+# os.mkdir(cwd+'/data_for_latent')
+np.savez(cwd+f'/data_for_latent/raw_dataset_{layer_sizes_name}.npz', data=torch_data_tensor, E=torch_E_tensor) #Save File 
 
 torch_dataset  = torchdata.TensorDataset(torch_E_tensor, torch_data_tensor)
 loader_encode = torchdata.DataLoader(torch_dataset, batch_size = batch_size, shuffle = False)
@@ -117,16 +157,18 @@ loader_encode = torchdata.DataLoader(torch_dataset, batch_size = batch_size, shu
 del data
 
 shape = dataset_config['SHAPE_PAD'][1:] if (not orig_shape) else dataset_config['SHAPE_ORIG'][1:]
-print(shape)
 checkpoint = torch.load(flags.model_loc, map_location = device)
 
 AE = CaloEnco(shape, config=dataset_config, training_obj='mean_pred', NN_embed=NN_embed, 
                         nsteps=dataset_config['NSTEPS'], cold_diffu=False, avg_showers=None, 
-                        std_showers=None, E_bins=None, layer_sizes=flags.layer_sizes).to(device = device)
+                        std_showers=None, E_bins=None, layer_sizes=layer_sizes).to(device = device)
+
 
 
 if('model_state_dict' in checkpoint.keys()): AE.load_state_dict(checkpoint['model_state_dict'])
 elif(len(checkpoint.keys()) > 1): AE.load_state_dict(checkpoint)
+
+## ^^ THIS LINE IS THE PROBLEM
 
 with torch.no_grad():
     print("Encoding Data...")
@@ -141,6 +183,6 @@ print("Data Successfully Encoded")
 encoded_data = torch.cat(encoded_data)
 print(f"Encoded Data Shape: {encoded_data.shape}")
 
-np.savez('/data_for_latent/encoded_dataset.npz', encoded_data) #Save File to 
+np.savez(cwd+f'/data_for_latent/encoded_dataset_{layer_sizes_name}.npz', encoded_data) #Save File to 
 
 
