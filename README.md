@@ -188,12 +188,20 @@ The `-m all` flag runs all the evaluations of the CaloChallenge (plots, chi2 met
 
 See `evaluate.py` for more options
 
-# Contributors:
+# Student Contributors This Quarter:
 
 Victor Brown
 
-Grey Singh
-
 Josh Li
 
+Grey Singh
+
 Aaron Zhang
+
+# Student Contributors From Previous Quarters:
+
+Keegan Ballantyne
+
+Carina Kane
+
+Doug Williams
