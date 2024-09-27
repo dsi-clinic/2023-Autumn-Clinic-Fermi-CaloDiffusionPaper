@@ -1,3 +1,18 @@
+## DSI Clinic Initial Week
+
+You will be meeting with the mentor during the 2nd week. Before meeting with them please do the following:
+
+1. Watch the video from [last year](https://drive.google.com/file/d/1eSQwKvNqEGQ-Ux75Su4xD01Tdht1RYxG/view) to become familiar with the project. 
+2. If you are not familiar with PyTorch, please begin going through this basic tutorial. Make sure to get through _at least_ the sections entitled (1) Tensors (2) Datasets & DataLoaders and (3) Transforms [here](https://pytorch.org/tutorials/beginner/basics/intro.html).
+3. Watch the recording here (look for the recording link on _Applications: Generative Models I_): [video link here](https://indico.physics.lbl.gov/event/2850/timetable/?view=standard#10-applications-generative-mod)
+
+
+After the first week some good places to start are:
+1. This notebook has a good tutorial: https://github.com/ml4fp/2024-lbnl/blob/main/generative/Gen_Tutorial_PyTorch.ipynb
+2. Then they could try this tutorial about diffusion models, which is the main idea we are working with : https://huggingface.co/blog/annotated-diffusion
+3. Then our paper can give a decent idea of this application : https://arxiv.org/abs/2308.03876
+
+
 # CaloDiffusion official repository
 
 Repo for diffusion based calorimeter generation. Now includes pipelines to train and evaluate autoencoders and latent diffusion models for calorimeter generation.
