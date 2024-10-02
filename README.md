@@ -205,14 +205,14 @@ See `evaluate.py` for more options
 
 # Student Contributors This Quarter:
 
-Victor Brown
-
-Josh Li
-
-Grey Singh
-
 Aaron Zhang
 
+Simon Katz
+
+Isaac Harlem
+
+Kevin Lin
+  
 # Student Contributors From Previous Quarters:
 
 Keegan Ballantyne
@@ -220,3 +220,9 @@ Keegan Ballantyne
 Carina Kane
 
 Doug Williams
+
+Victor Brown
+
+Josh Li
+
+Grey Singh
