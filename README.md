@@ -207,7 +207,7 @@ See `evaluate.py` for more options
 
 Aaron Zhang
 
-Simon Katz
+Simon Katz (simonkatz@uchicago.edu)
 
 Isaac Harlem
 
