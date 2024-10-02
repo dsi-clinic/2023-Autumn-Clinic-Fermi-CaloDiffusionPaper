@@ -207,7 +207,7 @@ See `evaluate.py` for more options
 
 Aaron Zhang
 
-Isaac Harlem
+Isaac Harlem (isaacharlem@uchicago.edu)
 
 # Student Contributors From Previous Quarters:
 
