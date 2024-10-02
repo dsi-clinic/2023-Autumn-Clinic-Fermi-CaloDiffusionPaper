@@ -205,15 +205,17 @@ See `evaluate.py` for more options
 
 # Student Contributors This Quarter:
 
+Aaron Zhang
+
+Isaac Harlem
+
+# Student Contributors From Previous Quarters:
+
 Victor Brown
 
 Josh Li
 
 Grey Singh
-
-Aaron Zhang
-
-# Student Contributors From Previous Quarters:
 
 Keegan Ballantyne
 
