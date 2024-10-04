@@ -207,13 +207,17 @@ See `evaluate.py` for more options
 
 Aaron Zhang
 
+Isaac Harlem (isaacharlem@uchicago.edu)
+                                        
 Simon Katz (simonkatz@uchicago.edu)
 
-Isaac Harlem
+# Student Contributors From Previous Quarters:
+
+Victor Brown
+
+Josh Li
 
 Kevin Lin
-  
-# Student Contributors From Previous Quarters:
 
 Keegan Ballantyne
 
