@@ -208,6 +208,8 @@ See `evaluate.py` for more options
 Aaron Zhang
 
 Isaac Harlem (isaacharlem@uchicago.edu)
+                                        
+Simon Katz (simonkatz@uchicago.edu)
 
 # Student Contributors From Previous Quarters:
 
@@ -215,10 +217,16 @@ Victor Brown
 
 Josh Li
 
-Grey Singh
+Kevin Lin
 
 Keegan Ballantyne
 
 Carina Kane
 
 Doug Williams
+
+Victor Brown
+
+Josh Li
+
+Grey Singh
