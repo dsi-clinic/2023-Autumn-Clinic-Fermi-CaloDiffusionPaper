@@ -6,7 +6,7 @@ import argparse
 import h5py as h5
 import torch.optim as optim
 import torch.utils.data as torchdata
-import tqdm
+from tqdm import tqdm
 
 from CaloDiffu import CaloDiffu
 
@@ -24,6 +24,8 @@ if __name__ == "__main__":
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
     else:
         device = torch.device("cpu")
 
@@ -164,13 +166,13 @@ if __name__ == "__main__":
                 flags.binning_file = (
                     "../CaloChallenge/code/binning_dataset_1_photons.xml"
                 )
-            bins = XMLHandler("photon", flags.binning_file)
+            bins = XMLHandler.XMLHandler("photon", flags.binning_file)
         else:
             if flags.binning_file is None:
                 flags.binning_file = (
                     "../CaloChallenge/code/binning_dataset_1_pions.xml"
                 )
-            bins = XMLHandler("pion", flags.binning_file)
+            bins = XMLHandler.XMLHandler("pion", flags.binning_file)
 
         NN_embed = NNConverter(bins=bins).to(device=device)
 
