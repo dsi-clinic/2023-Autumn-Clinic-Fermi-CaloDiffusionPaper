@@ -1,11 +1,11 @@
 #!/bin/bash
 #
 #SBATCH --job-name=fermi
-#SBATCH --output=/home/aaronz/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/logs/%j.%N.stdout
-#SBATCH --error=/home/aaronz/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/logs/%j.%N.stderr
-#SBATCH --chdir=/home/aaronz/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/
+#SBATCH --output=/home/isaacharlem/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/logs/%j.%N.stdout
+#SBATCH --error=/home/isaacharlem/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/logs/%j.%N.stderr
+#SBATCH --chdir=/home/isaacharlem/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/
 #SBATCH --partition=general
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:a100:1
 #SBATCH --mem=128G
 #SBATCH --time=12:00:00
 source /home/${USER}/.bashrc
