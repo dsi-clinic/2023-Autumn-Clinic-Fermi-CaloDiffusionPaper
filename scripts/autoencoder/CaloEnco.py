@@ -200,6 +200,7 @@ class CaloEnco(nn.Module):
                 cond_embed=(self.E_embed == "sin"),
                 time_embed=False,
                 resnet_set=self.resnet_set,
+                compress=config.get("COMPRESS_FACTOR", 2),
             )  # Removed time embeddings to match sizes
 
     # Wrapper for backwards compatability
