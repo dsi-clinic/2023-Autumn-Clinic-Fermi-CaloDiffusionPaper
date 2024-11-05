@@ -226,8 +226,12 @@ if __name__ == "__main__":
     )
 
     del torch_data_tensor, torch_E_tensor, train_dataset, val_dataset
+    if flags.learning_rate is None:
+        learning_rate = float(dataset_config["LR"])
+    else:
+        learning_rate = float(flags.learning_rate[0])
     checkpoint_folder = "../ae_models/{}_{}_{}_{}/".format(
-        dataset_config["CHECKPOINT_NAME"], flags.model, "_".join(map(str, flags.layer_sizes)), flags.learning_rate
+        dataset_config["CHECKPOINT_NAME"], flags.model, "_".join(map(str, flags.layer_sizes)), learning_rate
     )
     if (
         flags.save_folder_absolute is not None
@@ -299,14 +303,9 @@ if __name__ == "__main__":
 
     criterion = nn.MSELoss().to(device=device)
 
-    if flags.learning_rate is None:
-        optimizer = optim.Adam(
-            model.parameters(), lr=float(dataset_config["LR"])
-        )
-    else:
-        optimizer = optim.Adam(
-            model.parameters(), lr=float(flags.learning_rate[0])
-        )
+    optimizer = optim.Adam(
+        model.parameters(), lr=learning_rate
+    )
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer=optimizer, factor=0.1, patience=15, verbose=True
