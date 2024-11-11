@@ -544,6 +544,7 @@ class CondAE(nn.Module):
     - time_embed (bool): whether to embed time for UNet
     - cond_embed (bool): whether to embed energy 
     - resnet_set (list): alternate method to control downsampling, allows removal of resnet + downsample block combinations from UNet architecture 
+    - compress (int): compression factor when dividing dimensions size, default 2
     """
     def __init__(
         self,
@@ -561,7 +562,8 @@ class CondAE(nn.Module):
         data_shape = (-1,1,45, 16,9),
         time_embed = True,
         cond_embed = True,
-        resnet_set = [0,1,2]
+        resnet_set = [0,1,2],
+        compress = 2
     ):
         super().__init__()
 
@@ -650,6 +652,8 @@ class CondAE(nn.Module):
 
         cur_data_shape = data_shape[-3:] # Get (Z, H, W) dimensions
 
+        self.compress = compress # compression factor for Z, H, W dimensions
+
         # Build the downsampling layers
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = (ind >= (num_resolutions - 1))
@@ -668,8 +672,8 @@ class CondAE(nn.Module):
                         (cur_data_shape[2]) % 2
                     ]
                 # Update current data shape based on downsampling
-                Z_dim = cur_data_shape[0] if not compress_Z else math.ceil(cur_data_shape[0]/2.0)
-                cur_data_shape = (Z_dim, cur_data_shape[1] // 2, cur_data_shape[2] // 2)
+                Z_dim = cur_data_shape[0] if not compress_Z else math.ceil(cur_data_shape[0]/self.compress)
+                cur_data_shape = (Z_dim, cur_data_shape[1] // self.compress, cur_data_shape[2] // self.compress)
                 self.extra_upsamples.append(extra_upsample_dim)
 
             # Append downsampling blocks
@@ -755,8 +759,10 @@ class CondAE(nn.Module):
         - torch.Tensor: Reconstructed data tensor
         """
         # Generate energy embeddings
+        #print(f"Start: {x.shape}", flush=True)
         conditions = self.cond_mlp(cond)  
         x = self.init_conv(x) # Convolution
+        #print(f"Initial Conv: {x.shape}", flush=True)
 
         # Downsample
         for i, (block1, block2, downsample) in enumerate(self.downs):
@@ -765,12 +771,16 @@ class CondAE(nn.Module):
             if self.block_attn: 
                 x = self.downs_attn[i](x)
             x = downsample(x)
+            #print(f"Downsample {i + 1}: {x.shape}", flush=True)
 
         # Bottleneck
         x = self.mid_block1(x, conditions)
+        #print(f"Bottleneck 1: {x.shape}", flush=True)
         if self.mid_attn:
             x = self.mid_attn(x)
+            #print(f"Bottleneck Attention: {x.shape}", flush=True)
         x = self.mid_block2(x, conditions)
+        #print(f"Bottleneck 2: {x.shape}", flush=True)
 
         # Upsample
         for i, (block1, block2, upsample) in enumerate(self.ups):
@@ -779,8 +789,11 @@ class CondAE(nn.Module):
             if self.block_attn: 
                 x = self.ups_attn[i](x)
             x = upsample(x)
-     
-        return self.final_conv(x)
+            #print(f"Upsample {i + 1}: {x.shape}", flush=True)
+    
+        x = self.final_conv(x)
+        #print(f"Final Conv: {x.shape}", flush=True)
+        return x
     
     def encode(self, x, cond):
         """

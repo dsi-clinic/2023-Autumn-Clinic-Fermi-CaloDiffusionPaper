@@ -11,8 +11,6 @@ import torch.utils.data as torchdata
 import sys
 import os
 
-from CaloChallenge.code import XMLHandler
-
 # from ae_models import *
 from CaloEnco import CaloEnco
 import tqdm
@@ -33,8 +31,10 @@ if __name__ == "__main__":
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
+        print("Using CUDA")
     else:
         device = torch.device("cpu")
+        print("Using CPU")
 
     parser = argparse.ArgumentParser()
 
@@ -123,8 +123,8 @@ if __name__ == "__main__":
     calo_challenge_dir = trim_file_path(cwd=cwd, num_back=3)
     sys.path.append(calo_challenge_dir)
     print(calo_challenge_dir)
-    # from scripts.utils import *
-    # from CaloChallenge.code.XMLHandler import *
+    from scripts.utils import *
+    from CaloChallenge.code.XMLHandler import *
 
     dataset_config = LoadJson(flags.config)
 
@@ -226,8 +226,12 @@ if __name__ == "__main__":
     )
 
     del torch_data_tensor, torch_E_tensor, train_dataset, val_dataset
-    checkpoint_folder = "../ae_models/{}_{}/".format(
-        dataset_config["CHECKPOINT_NAME"], flags.model
+    if flags.learning_rate is None:
+        learning_rate = float(dataset_config["LR"])
+    else:
+        learning_rate = float(flags.learning_rate[0])
+    checkpoint_folder = "../ae_models/{}_{}_{}_{}/".format(
+        dataset_config["CHECKPOINT_NAME"], flags.model, "_".join(map(str, flags.layer_sizes)), learning_rate
     )
     if (
         flags.save_folder_absolute is not None
@@ -242,6 +246,7 @@ if __name__ == "__main__":
 
     if not os.path.exists(checkpoint_folder):
         os.makedirs(checkpoint_folder)
+        print(f"Checkpoint folder created at: {checkpoint_folder}")
 
     checkpoint = dict()
     checkpoint_path = os.path.join(checkpoint_folder, "checkpoint.pth")
@@ -298,14 +303,9 @@ if __name__ == "__main__":
 
     criterion = nn.MSELoss().to(device=device)
 
-    if flags.learning_rate is None:
-        optimizer = optim.Adam(
-            model.parameters(), lr=float(dataset_config["LR"])
-        )
-    else:
-        optimizer = optim.Adam(
-            model.parameters(), lr=float(flags.learning_rate[0])
-        )
+    optimizer = optim.Adam(
+        model.parameters(), lr=learning_rate
+    )
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer=optimizer, factor=0.1, patience=15, verbose=True
