@@ -7,6 +7,7 @@ import torch.optim as optim
 import torch.utils.data as torchdata
 from tqdm import tqdm
 import sys
+from torchinfo import torchinfo
 
 from CaloDiffu import CaloDiffu
 from autoencoder.CaloEnco import CaloEnco
@@ -201,6 +202,9 @@ class DiffusionTrainer:
             E_bins=self.E_bins,
         ).to(device=self.device)
 
+        print("\nDiffusion Model Summary:")
+        print(torchinfo.summary(self.model))
+
     def setup_latent_diffusion_model(self):
         ae_checkpoint = torch.load(self.flags.model_loc, map_location=self.device)
 
@@ -216,6 +220,9 @@ class DiffusionTrainer:
             E_bins=None,
             layer_sizes=self.flags.layer_sizes,
         ).to(device=self.device)
+
+        print("\nAutoEncoder Model Summary:")
+        print(torchinfo.summary(self.AE))
 
         if "model_state_dict" in ae_checkpoint.keys():
             self.AE.load_state_dict(ae_checkpoint["model_state_dict"])
@@ -270,6 +277,9 @@ class DiffusionTrainer:
             max_downsample=max_downsample,
             is_latent=True,
         ).to(device=self.device)
+
+        print("\nLatent Diffusion Model Summary:")
+        print(torchinfo.summary(self.model))
 
     def setup_training_components(self):
         if "model_state_dict" in self.checkpoint.keys():

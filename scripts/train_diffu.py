@@ -16,6 +16,7 @@ import utils
 import sys
 import torch
 
+from torchinfo import torchinfo
 
 from autoencoder.CaloEnco import CaloEnco
 
@@ -253,11 +254,9 @@ if __name__ == "__main__":
             std_showers=std_showers,
             E_bins=E_bins,
         ).to(device=device)
-
-    # Added a conditional statement, based off of flags.model, that runs the latent diffusion training pipeline to do the following three things:
-    # Encode data into a latent space with autoencoder
-    # Perform latent diffusion pipeline with encoded data
-    # Store trained latent diffusion model into directory
+        
+        print("\nDiffusion Model Summary:")
+        print(torchinfo.summary(model))
 
     elif flags.model == "Latent_Diffu":
         ae_checkpoint = torch.load(flags.model_loc, map_location=device)
@@ -343,6 +342,9 @@ if __name__ == "__main__":
             max_downsample=max_downsample,
             is_latent=True,
         ).to(device=device)
+
+        print("\nLatent Diffusion Model Summary:") 
+        print(torchinfo.summary(AE))
 
     else:
         print("Model %s not supported!" % flags.model)
