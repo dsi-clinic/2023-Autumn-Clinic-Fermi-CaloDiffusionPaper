@@ -1,5 +1,4 @@
-#some pytorch modules & useful functions
-from queue import PriorityQueue
+# some pytorch modules & useful functions
 from einops import rearrange
 import copy
 import math
@@ -8,10 +7,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import sys
 
 from inspect import isfunction
 from functools import partial
+
 
 def exists(x):
     """
@@ -41,13 +40,15 @@ def cosine_beta_schedule(nsteps, s=0.008):
     Returns:
     - betas (torch.Tensor): Beta schedule tensor.
     """
-    x = torch.linspace(0, nsteps, nsteps+1)
+    x = torch.linspace(0, nsteps, nsteps + 1)
     alphas_cumprod = torch.cos(((x / nsteps) + s) / (1 + s) * np.pi * 0.5) ** 2
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0.0001, 0.9999)
 
+
 # Custom Convolutional Layers
+
 
 class CylindricalConvTrans(nn.Module):
     """
@@ -55,18 +56,35 @@ class CylindricalConvTrans(nn.Module):
 
     Assumes input tensor format: (batch_size, channels, z_bin, phi_bin, r_bin)
     """
-    def __init__(self, dim_in, dim_out, kernel_size = (3,4,4), stride= (1,2,2), groups = 1, padding = 1, output_padding = 0):
+
+    def __init__(
+        self,
+        dim_in,
+        dim_out,
+        kernel_size=(3, 4, 4),
+        stride=(1, 2, 2),
+        groups=1,
+        padding=1,
+        output_padding=0,
+    ):
         super().__init__()
         # Adjust padding for circular dimension
-        if(type(padding) != int):
+        if not isinstance(padding, int):
             self.padding_orig = copy.copy(padding)
             padding = list(padding)
         else:
-            padding = [padding]*3
+            padding = [padding] * 3
             self.padding_orig = copy.copy(padding)
-            
-        padding[1] = kernel_size[1] - 1 # Adjust padding for phi_bin dimension
-        self.convTrans = nn.ConvTranspose3d(dim_in, dim_out, kernel_size = kernel_size, stride = stride, padding = padding, output_padding = output_padding)
+
+        padding[1] = kernel_size[1] - 1  # Adjust padding for phi_bin dimension
+        self.convTrans = nn.ConvTranspose3d(
+            dim_in,
+            dim_out,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            output_padding=output_padding,
+        )
 
     def forward(self, x):
         """
@@ -79,7 +97,7 @@ class CylindricalConvTrans(nn.Module):
         # To achieve 'same' use padding P = ((S-1)*W-S+F)/2, with F = filter size, S = stride, W = input size
         # Pad last dim with nothing, 2nd to last dim is circular one
         circ_pad = self.padding_orig[1]
-        x = F.pad(x, pad = (0,0, circ_pad, circ_pad, 0, 0), mode = 'circular')
+        x = F.pad(x, pad=(0, 0, circ_pad, circ_pad, 0, 0), mode="circular")
         x = self.convTrans(x)
         return x
 
@@ -90,11 +108,14 @@ class CylindricalConv(nn.Module):
 
     Assumes input tensor format: (batch_size, channels, z_bin, phi_bin, r_bin)
     """
-    def __init__(self, dim_in, dim_out, kernel_size = 3, stride=1, groups = 1, padding = 0, bias = True):
+
+    def __init__(
+        self, dim_in, dim_out, kernel_size=3, stride=1, groups=1, padding=0, bias=True
+    ):
         super().__init__()
         # Adjust padding for circular dimension
         if isinstance(padding, int):
-            padding = [padding]*3
+            padding = [padding] * 3
         else:
             self.padding_orig = copy.copy(padding)
             padding = list(padding)
@@ -104,10 +125,15 @@ class CylindricalConv(nn.Module):
         self.padding_orig = copy.copy(padding)
         padding[1] = 0  # Remove padding for phi_bin dimension
         self.conv = nn.Conv3d(
-            dim_in, dim_out, kernel_size=kernel_size, stride=stride,
-            groups=groups, padding=padding, bias=bias
+            dim_in,
+            dim_out,
+            kernel_size=kernel_size,
+            stride=stride,
+            groups=groups,
+            padding=padding,
+            bias=bias,
         )
-        
+
     def forward(self, x):
         """
         Forward pass for the cylindrical convolution.
@@ -118,11 +144,13 @@ class CylindricalConv(nn.Module):
         # To achieve 'same' use padding P = ((S-1)*W-S+F)/2, with F = filter size, S = stride, W = input size
         # Pad last dim with nothing, 2nd to last dim is circular one
         circ_pad = self.padding_orig[1]
-        x = F.pad(x, pad = (0,0, circ_pad, circ_pad, 0, 0), mode = 'circular')
+        x = F.pad(x, pad=(0, 0, circ_pad, circ_pad, 0, 0), mode="circular")
         x = self.conv(x)
         return x
 
+
 # Residual Block
+
 
 class Residual(nn.Module):
     """
@@ -130,6 +158,7 @@ class Residual(nn.Module):
 
     Applies a function and adds the input to the output (residual connection).
     """
+
     def __init__(self, fn):
         super().__init__()
         self.fn = fn
@@ -154,7 +183,9 @@ def extract(a, t, x_shape):
     out = a.gather(-1, t.cpu())
     return out.reshape(batch_size, *((1,) * (len(x_shape) - 1))).to(t.device)
 
+
 # Sinusoidal Position Embeddings
+
 
 class SinusoidalPositionEmbeddings(nn.Module):
     """
@@ -162,6 +193,7 @@ class SinusoidalPositionEmbeddings(nn.Module):
 
     Generates embeddings for time steps.
     """
+
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
@@ -182,34 +214,40 @@ class SinusoidalPositionEmbeddings(nn.Module):
         embeddings = torch.exp(torch.arange(half_dim, device=device) * -embeddings)
         embeddings = time[:, None] * embeddings[None, :]
         embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
-        return embeddings  
+        return embeddings
+
 
 # Basic Convolutional Block
+
 
 class Block(nn.Module):
     """
     Basic convolutional block with optional group normalization and activation.
     """
-    def __init__(self, dim, dim_out, groups = 8, cylindrical = False):
-        super().__init__()
-        if(not cylindrical): 
-            self.proj = nn.Conv3d(dim, dim_out, kernel_size = 3, padding = 1)
-        else:  self.proj = CylindricalConv(dim, dim_out, kernel_size = 3, padding = 1)
-        self.norm = nn.GroupNorm(groups, dim_out)
-        self.act = nn.SiLU() # Swish activation function
 
-    def forward(self, x, scale_shift = None):
+    def __init__(self, dim, dim_out, groups=8, cylindrical=False):
+        super().__init__()
+        if not cylindrical:
+            self.proj = nn.Conv3d(dim, dim_out, kernel_size=3, padding=1)
+        else:
+            self.proj = CylindricalConv(dim, dim_out, kernel_size=3, padding=1)
+        self.norm = nn.GroupNorm(groups, dim_out)
+        self.act = nn.SiLU()  # Swish activation function
+
+    def forward(self, x, scale_shift=None):
         x = self.proj(x)
         x = self.norm(x)
 
         if exists(scale_shift):
             scale, shift = scale_shift
-            x = x * (scale + 1) + shift # Apply scaling and shifting
+            x = x * (scale + 1) + shift  # Apply scaling and shifting
 
         x = self.act(x)
         return x
 
+
 # ResNet Block
+
 
 class ResnetBlock(nn.Module):
     """
@@ -217,7 +255,8 @@ class ResnetBlock(nn.Module):
 
     Reference: https://arxiv.org/abs/1512.03385
     """
-    def __init__(self, dim, dim_out, *, cond_emb_dim=None, groups=8, cylindrical = False):
+
+    def __init__(self, dim, dim_out, *, cond_emb_dim=None, groups=8, cylindrical=False):
         super().__init__()
         # Conditional embedding MLP
         self.mlp = (
@@ -227,26 +266,32 @@ class ResnetBlock(nn.Module):
         )
 
         # Convolution layers
-        conv = CylindricalConv(dim, dim_out, kernel_size = 1) if cylindrical else nn.Conv3d(dim, dim_out, kernel_size = 1)
-        self.block1 = Block(dim, dim_out, groups=groups, cylindrical = cylindrical)
-        self.block2 = Block(dim_out, dim_out, groups=groups, cylindrical = cylindrical)
+        conv = (
+            CylindricalConv(dim, dim_out, kernel_size=1)
+            if cylindrical
+            else nn.Conv3d(dim, dim_out, kernel_size=1)
+        )
+        self.block1 = Block(dim, dim_out, groups=groups, cylindrical=cylindrical)
+        self.block2 = Block(dim_out, dim_out, groups=groups, cylindrical=cylindrical)
         self.res_conv = conv if dim != dim_out else nn.Identity()
 
     def forward(self, x, time_emb=None):
         h = self.block1(x)
 
         # this would apply conditional embedding if available
-        '''
+        """
         if exists(self.mlp) and exists(time_emb):
             time_emb = self.mlp(time_emb)
             time_emb = rearrange(time_emb, "b c -> b c 1 1 1")
             h = h + time_emb
-        ''' # Not sure why this is commented out; investigate
+        """  # Not sure why this is commented out; investigate
 
         h = self.block2(h)
         return h + self.res_conv(x)
 
+
 # ConvNeXt Block
+
 
 class ConvNextBlock(nn.Module):
     """
@@ -254,7 +299,10 @@ class ConvNextBlock(nn.Module):
 
     Reference: https://arxiv.org/abs/2201.03545
     """
-    def __init__(self, dim, dim_out, *, cond_emb_dim=None, mult=2, norm=True, cylindrical = False):
+
+    def __init__(
+        self, dim, dim_out, *, cond_emb_dim=None, mult=2, norm=True, cylindrical=False
+    ):
         super().__init__()
         # Conditional embedding MLP
         self.mlp = (
@@ -262,23 +310,25 @@ class ConvNextBlock(nn.Module):
             if exists(cond_emb_dim)
             else None
         )
-        
+
         # Choose convolution operation based on cylindrical
         conv_op = CylindricalConv if cylindrical else nn.Conv3d
 
         # Depthwise convolution
-        self.ds_conv = conv_op(dim, dim, kernel_size = 7, padding=3, groups=dim)
+        self.ds_conv = conv_op(dim, dim, kernel_size=7, padding=3, groups=dim)
 
         # Convolutional layers and normalization
         self.net = nn.Sequential(
             nn.GroupNorm(1, dim) if norm else nn.Identity(),
-            conv_op(dim, dim_out * mult, kernel_size = 3, padding=1),
+            conv_op(dim, dim_out * mult, kernel_size=3, padding=1),
             nn.GELU(),
             nn.GroupNorm(1, dim_out * mult),
-            conv_op(dim_out * mult, dim_out, kernel_size =3, padding=1),
+            conv_op(dim_out * mult, dim_out, kernel_size=3, padding=1),
         )
 
-        self.res_conv = conv_op(dim, dim_out, kernel_size = 1) if dim != dim_out else nn.Identity()
+        self.res_conv = (
+            conv_op(dim, dim_out, kernel_size=1) if dim != dim_out else nn.Identity()
+        )
 
     def forward(self, x, time_emb=None):
         h = self.ds_conv(x)
@@ -289,69 +339,80 @@ class ConvNextBlock(nn.Module):
             h = h + rearrange(condition, "b c -> b c 1 1")
 
         h = self.net(h)
-        return h + self.res_conv(x) # Residual connection
+        return h + self.res_conv(x)  # Residual connection
+
 
 # Attention Mechanisms
+
 
 class Attention(nn.Module):
     """
     Multi-head self-attention module.
     """
-    def __init__(self, dim, heads=4, dim_head=32, cylindrical = False):
+
+    def __init__(self, dim, heads=4, dim_head=32, cylindrical=False):
         super().__init__()
-        self.scale = dim_head**-0.5 # Scaling factor
+        self.scale = dim_head**-0.5  # Scaling factor
         self.heads = heads
         hidden_dim = dim_head * heads
 
-        debug = False
-
         # Define convolutional operations based on cylindrical flag
-        if(cylindrical): 
-            self.to_qkv = CylindricalConv(dim, hidden_dim * 3, kernel_size = 1, bias=False)
-            self.to_out = CylindricalConv(hidden_dim, dim, kernel_size = 1)
-        else: 
-            self.to_qkv = nn.Conv3d(dim, hidden_dim * 3, kernel_size = 1, bias=False)
-            self.to_out = nn.Conv3d(hidden_dim, dim, kernel_size = 1)
+        if cylindrical:
+            self.to_qkv = CylindricalConv(
+                dim, hidden_dim * 3, kernel_size=1, bias=False
+            )
+            self.to_out = CylindricalConv(hidden_dim, dim, kernel_size=1)
+        else:
+            self.to_qkv = nn.Conv3d(dim, hidden_dim * 3, kernel_size=1, bias=False)
+            self.to_out = nn.Conv3d(hidden_dim, dim, kernel_size=1)
 
     def forward(self, x):
-        b, c, l, h, w = x.shape
+        b, c, n, h, w = x.shape
         # Compute queries, keys, and values
         qkv = self.to_qkv(x).chunk(3, dim=1)
         q, k, v = map(
             lambda t: rearrange(t, "b (h c) x y z -> b h c (x y z)", h=self.heads), qkv
         )
-        q = q * self.scale # Scale queries
+        q = q * self.scale  # Scale queries
 
         # Compute attention scores
         sim = torch.einsum("b h d i, b h d j -> b h i j", q, k)
-        sim = sim - sim.amax(dim=-1, keepdim=True).detach() # Stabilize softmax
+        sim = sim - sim.amax(dim=-1, keepdim=True).detach()  # Stabilize softmax
         attn = sim.softmax(dim=-1)
 
         # Compute attention output
         out = torch.einsum("b h i j, b h d j -> b h i d", attn, v)
-        out = rearrange(out, "b h (x y z) d -> b (h d) x y z", x=l, y=h, z=w)
+        out = rearrange(out, "b h (x y z) d -> b (h d) x y z", x=n, y=h, z=w)
         return self.to_out(out)
+
 
 class LinearAttention(nn.Module):
     """
     Linear attention module for computational efficiency.
     """
-    def __init__(self, dim, heads=1, dim_head=32, cylindrical = False):
+
+    def __init__(self, dim, heads=1, dim_head=32, cylindrical=False):
         super().__init__()
-        self.scale = dim_head**-0.5 # Scaling factor
+        self.scale = dim_head**-0.5  # Scaling factor
         self.heads = heads
         hidden_dim = dim_head * heads
 
         # Define convolution operations based on cylindrical flag
-        if(cylindrical):
-            self.to_qkv = CylindricalConv(dim, hidden_dim * 3, kernel_size = 1, bias=False)
-            self.to_out = nn.Sequential(CylindricalConv(hidden_dim, dim, kernel_size = 1), nn.GroupNorm(1,dim))
-        else: 
-            self.to_qkv = nn.Conv3d(dim, hidden_dim * 3, kernel_size = 1, bias=False)
-            self.to_out = nn.Sequential(nn.Conv3d(hidden_dim, dim, kernel_size = 1), nn.GroupNorm(1,dim))
+        if cylindrical:
+            self.to_qkv = CylindricalConv(
+                dim, hidden_dim * 3, kernel_size=1, bias=False
+            )
+            self.to_out = nn.Sequential(
+                CylindricalConv(hidden_dim, dim, kernel_size=1), nn.GroupNorm(1, dim)
+            )
+        else:
+            self.to_qkv = nn.Conv3d(dim, hidden_dim * 3, kernel_size=1, bias=False)
+            self.to_out = nn.Sequential(
+                nn.Conv3d(hidden_dim, dim, kernel_size=1), nn.GroupNorm(1, dim)
+            )
 
     def forward(self, x):
-        b, c, l, h, w = x.shape
+        b, c, n, h, w = x.shape
         # Compute queries, keys, and values
         qkv = self.to_qkv(x).chunk(3, dim=1)
         q, k, v = map(
@@ -362,16 +423,20 @@ class LinearAttention(nn.Module):
         q = q.softmax(dim=-2)
         k = k.softmax(dim=-1)
 
-        q = q * self.scale # Scale queries
+        q = q * self.scale  # Scale queries
         # Compute context
         context = torch.einsum("b h d n, b h e n -> b h d e", k, v)
         # Compute attention output
         out = torch.einsum("b h d e, b h d n -> b h e n", context, q)
-        out = rearrange(out, "b h c (x y z) -> b (h c) x y z", h=self.heads, x=l, y=h, z = w)
+        out = rearrange(
+            out, "b h c (x y z) -> b (h c) x y z", h=self.heads, x=n, y=h, z=w
+        )
         return self.to_out(out)
+
 
 class PreNorm(nn.Module):
     """Module to apply normalization before a function."""
+
     def __init__(self, dim, fn):
         super().__init__()
         self.fn = fn
@@ -384,7 +449,10 @@ class PreNorm(nn.Module):
 
 # Up and down sample in 2 dims but keep z dimm
 
-def Upsample(dim, extra_upsample = [0,0,0], cylindrical = False, compress_Z = False):
+
+def Upsample(
+    dim, extra_upsample=[0, 0, 0], cylindrical=False, compress_Z=False, compress=2
+):
     """
     Upsampling layer in 2 dimensions while optionally compressing the Z dimension.
 
@@ -393,26 +461,36 @@ def Upsample(dim, extra_upsample = [0,0,0], cylindrical = False, compress_Z = Fa
     - extra_upsample (list): Additional output padding for upsampling.
     - cylindrical (bool): Whether to use cylindrical convolution.
     - compress_Z (bool): Whether to adjust Z-dimension upsampling.
+    - compress (float): compression factor
 
     Returns:
     - nn.Module: Upsampling layer.
     """
-    Z_stride = 2 if compress_Z else 1
+    Z_stride = compress if compress_Z else 1
     Z_kernel = 4 if extra_upsample[0] > 0 else 3
 
-    extra_upsample[0] = 0 # Ensure Z-dimension extra upsample is zero
-    if(cylindrical): 
+    extra_upsample[0] = 0  # Ensure Z-dimension extra upsample is zero
+    if cylindrical:
         return CylindricalConvTrans(
-            dim, dim, kernel_size = (Z_kernel,4,4), stride = (Z_stride,2,2),
-            padding = 1, output_padding = extra_upsample
+            dim,
+            dim,
+            kernel_size=(Z_kernel, 4, 4),
+            stride=(Z_stride, compress, compress),
+            padding=1,
+            output_padding=extra_upsample,
         )
     else:
         return nn.ConvTranspose3d(
-            dim, dim, kernel_size = (Z_kernel,4,4), stride = (Z_stride,2,2),
-            padding = 1, output_padding = extra_upsample
+            dim,
+            dim,
+            kernel_size=(Z_kernel, 4, 4),
+            stride=(Z_stride, compress, compress),
+            padding=1,
+            output_padding=extra_upsample,
         )
 
-def Downsample(dim, cylindrical = False, compress_Z = False):
+
+def Downsample(dim, cylindrical=False, compress_Z=False, compress=2):
     """
     Downsampling layer in 2 dimensions while optionally compressing the Z dimension.
 
@@ -420,19 +498,34 @@ def Downsample(dim, cylindrical = False, compress_Z = False):
     - dim (int): Input dimension.
     - cylindrical (bool): Whether to use cylindrical convolution.
     - compress_Z (bool): Whether to adjust Z-dimension downsampling.
+    - compress (float): Compression factor
 
     Returns:
     - nn.Module: Downsampling layer.
     """
-    Z_stride = 2 if compress_Z else 1
-    if(cylindrical): 
-        return CylindricalConv(dim, dim, kernel_size = (3,4,4), stride = (Z_stride,2,2), padding = 1)
+    Z_stride = compress if compress_Z else 1
+    if cylindrical:
+        return CylindricalConv(
+            dim,
+            dim,
+            kernel_size=(3, 4, 4),
+            stride=(Z_stride, compress, compress),
+            padding=1,
+        )
     else:
-        return nn.Conv3d(dim, dim, kernel_size = (3,4,4), stride = (Z_stride,2,2), padding = 1)
+        return nn.Conv3d(
+            dim,
+            dim,
+            kernel_size=(3, 4, 4),
+            stride=(Z_stride, compress, compress),
+            padding=1,
+        )
     # Alternative using average pooling
     # return nn.AvgPool3d(kernel_size=(1,2,2), stride=(1,2,2), padding=0)
 
+
 # Fully Connected Network (FCN)
+
 
 class FCN(nn.Module):
     """
@@ -445,14 +538,15 @@ class FCN(nn.Module):
     - time_embed (bool): Whether to use time embeddings.
     - cond_embed (bool): Whether to use condition embeddings.
     """
-    def __init__(self,
-            dim_in = 356,
-            num_layers = 4, 
-            cond_dim = 64,
-            time_embed = True,
-            cond_embed = True,
-            ):
 
+    def __init__(
+        self,
+        dim_in=356,
+        num_layers=4,
+        cond_dim=64,
+        time_embed=True,
+        cond_embed=True,
+    ):
         super().__init__()
 
         # Time and energy embeddings
@@ -461,33 +555,33 @@ class FCN(nn.Module):
         # Time embedding layers
         time_layers = []
         if time_embed:
-            time_layers = [SinusoidalPositionEmbeddings(half_cond_dim//2)]
+            time_layers = [SinusoidalPositionEmbeddings(half_cond_dim // 2)]
         else:
             time_layers = [
                 nn.Unflatten(-1, (-1, 1)),
-                nn.Linear(1, half_cond_dim//2),
-                nn.GELU()
+                nn.Linear(1, half_cond_dim // 2),
+                nn.GELU(),
             ]
         time_layers += [
-            nn.Linear(half_cond_dim//2, half_cond_dim),
+            nn.Linear(half_cond_dim // 2, half_cond_dim),
             nn.GELU(),
-            nn.Linear(half_cond_dim, half_cond_dim)
+            nn.Linear(half_cond_dim, half_cond_dim),
         ]
 
         # Energy embedding layers
         cond_layers = []
-        if cond_embed: 
-            cond_layers = [SinusoidalPositionEmbeddings(half_cond_dim//2)]
-        else: 
+        if cond_embed:
+            cond_layers = [SinusoidalPositionEmbeddings(half_cond_dim // 2)]
+        else:
             cond_layers = [
                 nn.Unflatten(-1, (-1, 1)),
-                nn.Linear(1, half_cond_dim//2),
-                nn.GELU()
+                nn.Linear(1, half_cond_dim // 2),
+                nn.GELU(),
             ]
         cond_layers += [
-            nn.Linear(half_cond_dim//2, half_cond_dim),
+            nn.Linear(half_cond_dim // 2, half_cond_dim),
             nn.GELU(),
-            nn.Linear(half_cond_dim, half_cond_dim)
+            nn.Linear(half_cond_dim, half_cond_dim),
         ]
 
         self.time_mlp = nn.Sequential(*time_layers)
@@ -495,13 +589,11 @@ class FCN(nn.Module):
 
         # Main MLP layers
         out_layers = [nn.Linear(dim_in + cond_dim, dim_in)]
-        for _ in range(num_layers-1):
+        for _ in range(num_layers - 1):
             out_layers.append(nn.GELU())
             out_layers.append(nn.Linear(dim_in, dim_in))
 
         self.main_mlp = nn.Sequential(*out_layers)
-
-
 
     def forward(self, x, cond, time):
         """
@@ -517,18 +609,20 @@ class FCN(nn.Module):
         """
         t = self.time_mlp(time)
         c = self.cond_mlp(cond)
-        x = torch.cat([x, t,c], axis = -1)
+        x = torch.cat([x, t, c], axis=-1)
         x = self.main_mlp(x)
         return x
 
+
 # Conditional Autoencoder
 
+
 class CondAE(nn.Module):
-# Unet with conditional layers
+    # Unet with conditional layers
     """
-    Conditional autoencoder derived from the u-net structure that encodes original data into latent space 
+    Conditional autoencoder derived from the u-net structure that encodes original data into latent space
     to reduce dimensionality and reconstruct encoded data back into its original shape (decoding)
-        
+
     Parameters:
     - out_dim (int): number of output channel dimensions
     - layer_sizes (list): primary method to control downsampling, list of input channel dimensions which is zipped for UNet ResNet blocks
@@ -537,33 +631,34 @@ class CondAE(nn.Module):
     - resnet_block_groups (int): number of groups to separate channels into for group norm operation in Block()
     - use_convnext (bool): whether to use ConvNextBlocks in UNet
     - mid_attn (bool): whether to add attention blocks in between Resnet + Downsample combos in UNet
-    - compress_Z (bool): indicates need to adjust z-dimension downsampling for consistency 
+    - compress_Z (bool): indicates need to adjust z-dimension downsampling for consistency
     - convnext_mult (int): groupnorm output dimension multiplier
     - cylindrical (bool): indicates whether convolutions are cylindrical or not
     - data_shape (tuple): shape of input data samples
     - time_embed (bool): whether to embed time for UNet
-    - cond_embed (bool): whether to embed energy 
-    - resnet_set (list): alternate method to control downsampling, allows removal of resnet + downsample block combinations from UNet architecture 
+    - cond_embed (bool): whether to embed energy
+    - resnet_set (list): alternate method to control downsampling, allows removal of resnet + downsample block combinations from UNet architecture
     - compress (int): compression factor when dividing dimensions size, default 2
     """
+
     def __init__(
         self,
         out_dim=1,
-        layer_sizes = None,
+        layer_sizes=None,
         channels=1,
-        cond_dim = 64,
+        cond_dim=64,
         resnet_block_groups=8,
         use_convnext=False,
-        mid_attn = False,
-        block_attn = False,
-        compress_Z = False,
+        mid_attn=False,
+        block_attn=False,
+        compress_Z=False,
         convnext_mult=2,
-        cylindrical = False,
-        data_shape = (-1,1,45, 16,9),
-        time_embed = True,
-        cond_embed = True,
-        resnet_set = [0,1,2],
-        compress = 2
+        cylindrical=False,
+        data_shape=(-1, 1, 45, 16, 9),
+        time_embed=True,
+        cond_embed=True,
+        resnet_set=[0, 1, 2],
+        compress=2,
     ):
         super().__init__()
 
@@ -572,36 +667,34 @@ class CondAE(nn.Module):
         self.block_attn = block_attn
         self.mid_attn = mid_attn
         self.resnet_set = resnet_set
-        
+
         # Adjust dimensionality based on resnet_set
-        if self.resnet_set != [0,1,2]:
+        if self.resnet_set != [0, 1, 2]:
             self.plus_one = True
         else:
             self.plus_one = False
 
-        in_out = list(zip(layer_sizes[:-1], layer_sizes[1:])) 
-        
+        in_out = list(zip(layer_sizes[:-1], layer_sizes[1:]))
+
         # Initialize convolutions as cylindrical or not
-        if not cylindrical: 
+        if not cylindrical:
             self.init_conv = nn.Conv3d(
-                channels,
-                layer_sizes[0],
-                kernel_size = 3,
-                padding = 1
-            ) 
+                channels, layer_sizes[0], kernel_size=3, padding=1
+            )
         else:
             self.init_conv = CylindricalConv(
-                channels,
-                layer_sizes[0],
-                kernel_size = 3,
-                padding = 1
+                channels, layer_sizes[0], kernel_size=3, padding=1
             )
 
         # Chose block type (ResNet or ConvNeXt)
         if use_convnext:
-            block_klass = partial(ConvNextBlock, mult=convnext_mult, cylindrical = cylindrical)
+            block_klass = partial(
+                ConvNextBlock, mult=convnext_mult, cylindrical=cylindrical
+            )
         else:
-            block_klass = partial(ResnetBlock, groups=resnet_block_groups, cylindrical = cylindrical)
+            block_klass = partial(
+                ResnetBlock, groups=resnet_block_groups, cylindrical=cylindrical
+            )
 
         # Time and energy embeddings
         half_cond_dim = cond_dim // 2
@@ -609,33 +702,33 @@ class CondAE(nn.Module):
         # Time embedding layers
         time_layers = []
         if time_embed:
-            time_layers = [SinusoidalPositionEmbeddings(half_cond_dim//2)]
+            time_layers = [SinusoidalPositionEmbeddings(half_cond_dim // 2)]
         else:
             time_layers = [
                 nn.Unflatten(-1, (-1, 1)),
-                nn.Linear(1, half_cond_dim//2),
-                nn.GELU()
+                nn.Linear(1, half_cond_dim // 2),
+                nn.GELU(),
             ]
         time_layers += [
-            nn.Linear(half_cond_dim//2, half_cond_dim),
+            nn.Linear(half_cond_dim // 2, half_cond_dim),
             nn.GELU(),
-            nn.Linear(half_cond_dim, half_cond_dim)
+            nn.Linear(half_cond_dim, half_cond_dim),
         ]
 
         # Energy embedding layers
         cond_layers = []
         if cond_embed:
-            cond_layers = [SinusoidalPositionEmbeddings(half_cond_dim//2)]
+            cond_layers = [SinusoidalPositionEmbeddings(half_cond_dim // 2)]
         else:
             cond_layers = [
                 nn.Unflatten(-1, (-1, 1)),
-                nn.Linear(1, half_cond_dim//2),
-                nn.GELU()
+                nn.Linear(1, half_cond_dim // 2),
+                nn.GELU(),
             ]
         cond_layers += [
-            nn.Linear(half_cond_dim//2, half_cond_dim),
+            nn.Linear(half_cond_dim // 2, half_cond_dim),
             nn.GELU(),
-            nn.Linear(half_cond_dim, half_cond_dim)
+            nn.Linear(half_cond_dim, half_cond_dim),
         ]
 
         self.time_mlp = nn.Sequential(*time_layers)
@@ -650,30 +743,38 @@ class CondAE(nn.Module):
         self.Z_even = []
         num_resolutions = len(in_out)
 
-        cur_data_shape = data_shape[-3:] # Get (Z, H, W) dimensions
+        cur_data_shape = data_shape[-3:]  # Get (Z, H, W) dimensions
 
-        self.compress = compress # compression factor for Z, H, W dimensions
-
+        self.compress = compress  # compression factor for Z, H, W dimensions
+        print(f"CaloEnco compress factor config: {self.compress}", flush=True)
         # Build the downsampling layers
         for ind, (dim_in, dim_out) in enumerate(in_out):
-            is_last = (ind >= (num_resolutions - 1))
+            is_last = ind >= (num_resolutions - 1)
             if not is_last:
                 # Added +1 for extra upsampling to match dimensionality for pytorch model
                 if self.plus_one:
                     extra_upsample_dim = [
-                        (cur_data_shape[0] + 1) % 2,
-                        cur_data_shape[1] % 2,
-                        (cur_data_shape[2] + 1) % 2
+                        (cur_data_shape[0] + 1) % self.compress,
+                        cur_data_shape[1] % self.compress,
+                        (cur_data_shape[2] + 1) % self.compress,
                     ]
                 else:
                     extra_upsample_dim = [
-                        (cur_data_shape[0] + 1) % 2,
-                        cur_data_shape[1] % 2,
-                        (cur_data_shape[2]) % 2
+                        (cur_data_shape[0] + 1) % self.compress,
+                        cur_data_shape[1] % self.compress,
+                        (cur_data_shape[2]) % self.compress,
                     ]
                 # Update current data shape based on downsampling
-                Z_dim = cur_data_shape[0] if not compress_Z else math.ceil(cur_data_shape[0]/self.compress)
-                cur_data_shape = (Z_dim, cur_data_shape[1] // self.compress, cur_data_shape[2] // self.compress)
+                Z_dim = (
+                    cur_data_shape[0]
+                    if not compress_Z
+                    else math.ceil(cur_data_shape[0] / self.compress)
+                )
+                cur_data_shape = (
+                    Z_dim,
+                    cur_data_shape[1] // self.compress,
+                    cur_data_shape[2] // self.compress,
+                )
                 self.extra_upsamples.append(extra_upsample_dim)
 
             # Append downsampling blocks
@@ -682,7 +783,14 @@ class CondAE(nn.Module):
                     [
                         block_klass(dim_in, dim_out, cond_emb_dim=cond_dim),
                         block_klass(dim_out, dim_out, cond_emb_dim=cond_dim),
-                        Downsample(dim_out, cylindrical, compress_Z = compress_Z) if not is_last else nn.Identity(),
+                        Downsample(
+                            dim_out,
+                            cylindrical,
+                            compress_Z=compress_Z,
+                            compress=self.compress,
+                        )
+                        if not is_last
+                        else nn.Identity(),
                     ]
                 )
             )
@@ -690,8 +798,7 @@ class CondAE(nn.Module):
                 self.downs_attn.append(
                     Residual(
                         PreNorm(
-                            dim_out, 
-                            LinearAttention(dim_out, cylindrical = cylindrical)
+                            dim_out, LinearAttention(dim_out, cylindrical=cylindrical)
                         )
                     )
                 )
@@ -699,29 +806,33 @@ class CondAE(nn.Module):
         # Middle (bottleneck) layers
         mid_dim = layer_sizes[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, cond_emb_dim=cond_dim)
-        if self.mid_attn: 
+        if self.mid_attn:
             self.mid_attn = Residual(
-                PreNorm(
-                    mid_dim, 
-                    LinearAttention(mid_dim, cylindrical = cylindrical)
-                )
+                PreNorm(mid_dim, LinearAttention(mid_dim, cylindrical=cylindrical))
             )
         self.mid_block2 = block_klass(mid_dim, mid_dim, cond_emb_dim=cond_dim)
 
         # Build the upsampling layers
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
-            is_last = (ind >= (num_resolutions - 1))
+            is_last = ind >= (num_resolutions - 1)
 
-            if not is_last: 
+            if not is_last:
                 extra_upsample = self.extra_upsamples.pop()
-
 
             self.ups.append(
                 nn.ModuleList(
                     [
                         block_klass(dim_out, dim_in, cond_emb_dim=cond_dim),
-                        block_klass(dim_in, dim_in, cond_emb_dim=cond_dim), 
-                        Upsample(dim_in, extra_upsample, cylindrical, compress_Z = compress_Z) if not is_last else nn.Identity(),
+                        block_klass(dim_in, dim_in, cond_emb_dim=cond_dim),
+                        Upsample(
+                            dim_in,
+                            extra_upsample,
+                            cylindrical,
+                            compress_Z=compress_Z,
+                            compress=self.compress,
+                        )
+                        if not is_last
+                        else nn.Identity(),
                     ]
                 )
             )
@@ -729,8 +840,7 @@ class CondAE(nn.Module):
                 self.ups_attn.append(
                     Residual(
                         PreNorm(
-                            dim_in,
-                            LinearAttention(dim_in, cylindrical = cylindrical)
+                            dim_in, LinearAttention(dim_in, cylindrical=cylindrical)
                         )
                     )
                 )
@@ -741,100 +851,99 @@ class CondAE(nn.Module):
         else:
             final_lay = CylindricalConv(layer_sizes[0], out_dim, 1)
         self.final_conv = nn.Sequential(
-            block_klass(layer_sizes[1], layer_sizes[0]),
-            final_lay
+            block_klass(layer_sizes[1], layer_sizes[0]), final_lay
         )
 
-    def forward(self, x, cond, time):    
+    def forward(self, x, cond, time):
         """
         Class function that performs the full forward pass the both encodes the original data, passes it through a linear attention,
         and decodes the encoded data to reconstruct it back to its original shape
-        
+
         Parameters:
         - x (torch.tensor): data to be encoded
         - cond (torch.tensor): energies
         - time (torch.tensor): time embedding
-        
+
         Returns:
         - torch.Tensor: Reconstructed data tensor
         """
         # Generate energy embeddings
-        #print(f"Start: {x.shape}", flush=True)
-        conditions = self.cond_mlp(cond)  
-        x = self.init_conv(x) # Convolution
-        #print(f"Initial Conv: {x.shape}", flush=True)
+        # print(f"Start: {x.shape}", flush=True)
+        conditions = self.cond_mlp(cond)
+        x = self.init_conv(x)  # Convolution
+        # print(f"Initial Conv: {x.shape}", flush=True)
 
         # Downsample
         for i, (block1, block2, downsample) in enumerate(self.downs):
-            x = block1(x, conditions)            
+            x = block1(x, conditions)
             x = block2(x, conditions)
-            if self.block_attn: 
+            if self.block_attn:
                 x = self.downs_attn[i](x)
             x = downsample(x)
-            #print(f"Downsample {i + 1}: {x.shape}", flush=True)
+            # print(f"Downsample {i + 1}: {x.shape}", flush=True)
 
         # Bottleneck
         x = self.mid_block1(x, conditions)
-        #print(f"Bottleneck 1: {x.shape}", flush=True)
+        # print(f"Bottleneck 1: {x.shape}", flush=True)
         if self.mid_attn:
             x = self.mid_attn(x)
-            #print(f"Bottleneck Attention: {x.shape}", flush=True)
+            # print(f"Bottleneck Attention: {x.shape}", flush=True)
         x = self.mid_block2(x, conditions)
-        #print(f"Bottleneck 2: {x.shape}", flush=True)
+        # print(f"Bottleneck 2: {x.shape}", flush=True)
 
         # Upsample
         for i, (block1, block2, upsample) in enumerate(self.ups):
             x = block1(x, conditions)
             x = block2(x, conditions)
-            if self.block_attn: 
+            if self.block_attn:
                 x = self.ups_attn[i](x)
             x = upsample(x)
-            #print(f"Upsample {i + 1}: {x.shape}", flush=True)
-    
+            # print(f"Upsample {i + 1}: {x.shape}", flush=True)
+
         x = self.final_conv(x)
-        #print(f"Final Conv: {x.shape}", flush=True)
+        # print(f"Final Conv: {x.shape}", flush=True)
         return x
-    
+
     def encode(self, x, cond):
         """
         Class function that performs only the encoding step in the conditional u-net to transform original data into a lower
         dimensional space to generated a latent space
-        
+
         Parameters:
         - x (torch.tensor): data to be encoded
         - cond (torch.tensor): energies
-        
+
         Returns:
         - torch.Tensor: Encoded data (latent space representation)
         """
         conditions = self.cond_mlp(cond)
 
-        x = self.init_conv(x) # Initial convolution
+        x = self.init_conv(x)  # Initial convolution
 
         # downsample
         for i, (block1, block2, downsample) in enumerate(self.downs):
             x = block1(x, conditions)
             x = block2(x, conditions)
-            if(self.block_attn): 
+            if self.block_attn:
                 x = self.downs_attn[i](x)
             x = downsample(x)
 
-        # bottleneck convolution and attention 
+        # bottleneck convolution and attention
         x = self.mid_block1(x, conditions)
         if self.mid_attn:
             x = self.mid_attn(x)
-        
-        return x # Return latent representation
-    
+
+        return x  # Return latent representation
+
     def decode(self, x, cond):
         """
         Class function that performs only the decoding step in the conditional u-net to transform encoded data into its original dimension size
         or otherwise transforming latent space shape into original shape
-        
+
         Parameters:
         - x (torch.tensor): Encoded data tensor (latent space).
         - cond (torch.tensor): energies
-        
+
         Returns:
         - torch.Tensor: Decoded data tensor
         """
@@ -849,8 +958,8 @@ class CondAE(nn.Module):
         for i, (block1, block2, upsample) in enumerate(self.ups):
             x = block1(x, conditions)
             x = block2(x, conditions)
-            if(self.block_attn): 
+            if self.block_attn:
                 x = self.ups_attn[i](x)
             x = upsample(x)
-     
-        return self.final_conv(x) # final convolution to reconstruct data
+
+        return self.final_conv(x)  # final convolution to reconstruct data
