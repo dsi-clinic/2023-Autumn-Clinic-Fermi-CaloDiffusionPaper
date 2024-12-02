@@ -211,13 +211,13 @@ Isaac Harlem (isaacharlem@uchicago.edu)
                                         
 Simon Katz (simonkatz@uchicago.edu)
 
+Kevin Lin (klin665@uchicago.edu)
+
 # Student Contributors From Previous Quarters:
 
 Victor Brown
 
 Josh Li
-
-Kevin Lin
 
 Keegan Ballantyne
 
