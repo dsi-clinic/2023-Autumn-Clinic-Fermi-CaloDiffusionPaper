@@ -16,7 +16,15 @@ import utils
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 class DiffusionTrainer:
+    """A trainer class for diffusion models used in calorimeter shower generation.
+    
+    This class handles the complete training pipeline including data loading, model setup,
+    training loop execution, and checkpoint management. It supports both regular diffusion
+    and latent diffusion models.
+    """
+
     def __init__(self):
+        """Initialize the DiffusionTrainer with device setup, configs, and training components."""
         self.device = self.set_device()
         self.flags = self.parse_arguments()
         self.dataset_config = utils.LoadJson(self.flags.config)
@@ -27,6 +35,11 @@ class DiffusionTrainer:
         self.setup_training_components()
 
     def set_device(self):
+        """Set up the computation device (CUDA, MPS, or CPU) based on availability.
+        
+        Returns:
+            torch.device: The selected computation device
+        """
         if torch.cuda.is_available():
             device = torch.device("cuda")
             print("Device: cuda")
@@ -39,6 +52,11 @@ class DiffusionTrainer:
         return device
 
     def parse_arguments(self):
+        """Parse command line arguments for training configuration.
+        
+        Returns:
+            argparse.Namespace: Parsed command line arguments
+        """
         parser = argparse.ArgumentParser()
         parser.add_argument("--data_folder", default="/wclustre/cms_mlsim/denoise/CaloChallenge/", help="Folder containing data and MC files")
         parser.add_argument("--model", default="Diffu", help="Diffusion model to train")
@@ -55,6 +73,11 @@ class DiffusionTrainer:
         return parser.parse_args()
 
     def setup_paths(self):
+        """Configure system paths and import required modules.
+        
+        Trims the current working directory path and adds necessary paths to sys.path
+        for importing custom modules.
+        """
         def trim_file_path(cwd: str, num_back: int):
             split_path = cwd.split("/")
             trimmed_split_path = split_path[:-num_back]
@@ -71,6 +94,11 @@ class DiffusionTrainer:
         self.XMLHandler = XMLHandler
 
     def setup_training_params(self):
+        """Initialize training parameters from the configuration file.
+        
+        Sets up parameters like batch size, epochs, early stopping criteria,
+        and various training-specific flags.
+        """
         torch.manual_seed(self.flags.seed)
         self.cold_diffu = self.dataset_config.get("COLD_DIFFU", False)
         self.cold_noise_scale = self.dataset_config.get("COLD_NOISE", 1.0)
@@ -86,6 +114,11 @@ class DiffusionTrainer:
         self.energy_loss_scale = self.dataset_config.get("ENERGY_LOSS_SCALE", 0.0)
 
     def setup_data(self):
+        """Load and prepare training data from specified files.
+        
+        Handles data loading, preprocessing, and creation of data loaders
+        for both training and validation sets.
+        """
         self.data = []
         self.energies = []
 
@@ -116,6 +149,11 @@ class DiffusionTrainer:
         self.prepare_data_tensors()
 
     def setup_cold_diffusion(self):
+        """Set up cold diffusion parameters if enabled.
+        
+        Loads average and standard deviation of showers and energy bins
+        from the specified file if cold diffusion is enabled.
+        """
         self.avg_showers = self.std_showers = self.E_bins = None
         if self.cold_diffu:
             f_avg_shower = h5.File(self.dataset_config["AVG_SHOWER_LOC"])
@@ -124,6 +162,10 @@ class DiffusionTrainer:
             self.E_bins = torch.from_numpy(f_avg_shower["E_bins"][()].astype(np.float32)).to(device=self.device)
 
     def setup_nn_embed(self):
+        """Set up neural network embedding if specified in the configuration.
+        
+        Initializes the NNConverter with binning information based on the dataset number.
+        """
         self.NN_embed = None
         if "NN" in self.shower_embed:
             if self.dataset_num == 1:
@@ -138,6 +180,11 @@ class DiffusionTrainer:
             self.NN_embed = self.NNConverter(bins=bins).to(device=self.device)
 
     def prepare_data_tensors(self):
+        """Prepare data tensors for training and validation.
+        
+        Reshapes data and energy arrays, converts them to PyTorch tensors,
+        and creates data loaders for training and validation datasets.
+        """
         dshape = self.dataset_config["SHAPE_PAD"]
         self.energies = np.reshape(self.energies, (-1))
         if not self.orig_shape:
@@ -167,6 +214,11 @@ class DiffusionTrainer:
             del self.torch_E_tensor, train_dataset, val_dataset
 
     def setup_model(self):
+        """Initialize the diffusion model architecture.
+        
+        Sets up either a regular diffusion model or a latent diffusion model
+        based on configuration. Also handles checkpoint loading if specified.
+        """
         self.checkpoint_folder = "../models/{}_{}/".format(self.dataset_config["CHECKPOINT_NAME"], self.flags.model)
         if self.flags.save_folder_append is not None:
             self.checkpoint_folder = f"{self.checkpoint_folder}{self.flags.save_folder_append}/"
@@ -282,6 +334,11 @@ class DiffusionTrainer:
         print(torchinfo.summary(self.model))
 
     def setup_training_components(self):
+        """Initialize components needed for training.
+        
+        Sets up loss functions, optimizer, learning rate scheduler,
+        and loads previous training state if resuming training.
+        """
         if "model_state_dict" in self.checkpoint.keys():
             self.model.load_state_dict(self.checkpoint["model_state_dict"])
         elif len(self.checkpoint.keys()) > 1:
@@ -315,6 +372,11 @@ class DiffusionTrainer:
             self.start_epoch = self.checkpoint["epoch"] + 1
 
     def train(self):
+        """Execute the main training loop.
+        
+        Iterates through epochs, performing training and validation steps,
+        while handling early stopping and model checkpointing.
+        """
         for epoch in range(self.start_epoch, self.num_epochs):
             print(f"Beginning epoch {epoch}", flush=True)
             self.train_epoch(epoch)
@@ -328,6 +390,13 @@ class DiffusionTrainer:
         self.save_final_model()
 
     def train_epoch(self, epoch):
+        """Train the model for one epoch.
+        
+        Args:
+            epoch (int): Current epoch number
+            
+        Updates training loss history and performs optimization steps.
+        """
         self.model.train()
         train_loss = 0
 
@@ -356,6 +425,13 @@ class DiffusionTrainer:
         print(f"loss: {train_loss}")
 
     def validate_epoch(self, epoch):
+        """Validate the model for one epoch.
+        
+        Args:
+            epoch (int): Current epoch number
+            
+        Updates validation loss history and saves best model if applicable.
+        """
         self.model.eval()
         val_loss = 0
 
@@ -382,9 +458,21 @@ class DiffusionTrainer:
             self.min_validation_loss = val_loss
 
     def update_scheduler(self, epoch):
+        """Update the learning rate scheduler based on the current epoch's training loss.
+        
+        Args:
+            epoch (int): Current epoch number
+        """
         self.scheduler.step(torch.tensor([self.training_losses[epoch]]))
 
     def save_checkpoint(self, epoch):
+        """Save a training checkpoint.
+        
+        Args:
+            epoch (int): Current epoch number
+            
+        Saves model state, optimizer state, loss history, and other training components.
+        """
         self.model.eval()
         print("SAVING")
 
@@ -404,6 +492,10 @@ class DiffusionTrainer:
             vfileout.write("\n".join("{}".format(vl) for vl in self.val_losses) + "\n")
 
     def save_final_model(self):
+        """Save the final trained model and training history.
+        
+        Saves the model state dict and writes training/validation losses to files.
+        """
         print(f"Saving to {self.checkpoint_folder}", flush=True)
         torch.save(self.model.state_dict(), os.path.join(self.checkpoint_folder, "final.pth"))
 
