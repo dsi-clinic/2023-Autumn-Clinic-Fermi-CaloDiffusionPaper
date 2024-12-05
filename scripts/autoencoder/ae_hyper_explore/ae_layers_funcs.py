@@ -1,4 +1,4 @@
-"""Function .py file for ae_layers Notebook"""
+"""Function .py file for Analysis Notebooks"""
 
 import pandas as pd
 import matplotlib.pyplot as plt
