@@ -203,6 +203,14 @@ The `-m all` flag runs all the evaluations of the CaloChallenge (plots, chi2 met
 
 See `evaluate.py` for more options
 
+# Generating AutoEncoder Evaluation Graphs:
+Use the notebooks found in `/scripts/autoencoder/ae_hyper_explore/` to generate graphs of the autoencoder results.  
+`LR_analysis.ipynb` compares autoencoder models with different learning rates, hard coded to 4e-3, -4, and -5.  
+`dataset1_analysis.ipynb` compares autoencoder models specifically trained on dataset1.  
+`dataset2_analysis.ipynb` compares autoencoder models specifically trained on dataset2.  
+Relative paths are in reference to folder in which models are stored. Please see `ae_layers_funcs.py` for more details
+on how code works for all notebooks in terms of loading data and graphing such respectively.
+
 # Student Contributors This Quarter:
 
 Aaron Zhang
