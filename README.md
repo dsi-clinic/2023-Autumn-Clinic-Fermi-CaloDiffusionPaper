@@ -225,6 +225,8 @@ on how code works for all notebooks in terms of loading data and graphing such r
 
 # Student Contributors This Quarter:
 
+Emily Tong (emilytong@uchicago.edu)
+
 Aaron Zhang
 
 Isaac Harlem (isaacharlem@uchicago.edu)
