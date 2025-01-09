@@ -233,6 +233,8 @@ Simon Katz (simonkatz@uchicago.edu)
 
 Kevin Lin (klin665@uchicago.edu)
 
+Kristen Wallace (kwallace2@uchicago.edu)
+
 # Student Contributors From Previous Quarters:
 
 Victor Brown
