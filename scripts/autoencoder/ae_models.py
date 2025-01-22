@@ -963,3 +963,106 @@ class CondAE(nn.Module):
             x = upsample(x)
 
         return self.final_conv(x)  # final convolution to reconstruct data
+
+
+class CondVAE(CondAE):
+    """
+    Conditional Variational Autoencoder implementation that extends CondAE.
+    Adds reparameterization trick and KL divergence loss.
+    """
+    def __init__(
+        self,
+        out_dim=1,
+        layer_sizes=None,
+        channels=1,
+        cond_dim=64,
+        resnet_block_groups=8,
+        use_convnext=False,
+        mid_attn=False,
+        block_attn=False,
+        compress_Z=False,
+        convnext_mult=2,
+        cylindrical=False,
+        data_shape=(-1, 1, 45, 16, 9),
+        time_embed=True,
+        cond_embed=True,
+        resnet_set=[0, 1, 2],
+        compress=2,
+        latent_dim=None  # If None, will use the same as encoder output
+    ):
+        super().__init__(
+            out_dim=out_dim,
+            layer_sizes=layer_sizes,
+            channels=channels,
+            cond_dim=cond_dim,
+            resnet_block_groups=resnet_block_groups,
+            use_convnext=use_convnext,
+            mid_attn=mid_attn,
+            block_attn=block_attn,
+            compress_Z=compress_Z,
+            convnext_mult=convnext_mult,
+            cylindrical=cylindrical,
+            data_shape=data_shape,
+            time_embed=time_embed,
+            cond_embed=cond_embed,
+            resnet_set=resnet_set,
+            compress=compress,
+        )
+        
+        # Get encoder output dimension
+        self.encoder_out_dim = self.encoder.out_dim
+        self.latent_dim = latent_dim if latent_dim is not None else self.encoder_out_dim
+        
+        # Replace final encoder layers to output mean and log variance
+        self.fc_mu = nn.Linear(self.encoder_out_dim, self.latent_dim)
+        self.fc_var = nn.Linear(self.encoder_out_dim, self.latent_dim)
+        
+        # Adjust decoder input if latent dimension changed
+        if self.latent_dim != self.encoder_out_dim:
+            self.latent_proj = nn.Linear(self.latent_dim, self.encoder_out_dim)
+        else:
+            self.latent_proj = nn.Identity()
+
+    def reparameterize(self, mu, log_var):
+        """
+        Reparameterization trick to sample from N(mu, var) from N(0,1).
+        """
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def encode(self, x, cond):
+        """
+        Encodes input to mean and log variance of latent distribution.
+        """
+        # Get encoder features
+        h = self.encoder(x, cond)
+        
+        # Get mean and log variance
+        mu = self.fc_mu(h)
+        log_var = self.fc_var(h)
+        
+        # Sample latent vector
+        z = self.reparameterize(mu, log_var)
+        
+        return z, mu, log_var
+
+    def forward(self, x, cond, time):
+        """
+        Forward pass returning reconstruction, mean, and log variance.
+        """
+        # Encode
+        z, mu, log_var = self.encode(x, cond)
+        
+        # Project if needed and decode
+        z = self.latent_proj(z)
+        recon = self.decode(z, cond)
+        
+        return recon, mu, log_var
+
+    def get_kl_loss(self, mu, log_var):
+        """
+        Computes KL divergence loss between N(mu, var) and N(0, 1).
+        """
+        kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp(), dim=1)
+        return kl_loss.mean()
