@@ -117,6 +117,25 @@ if __name__ == "__main__":
         default=None,
         help="Manually assign a maximum number of epochs",
     )
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="AE",
+        choices=["AE", "VAE"],
+        help="Type of autoencoder to train (AE or VAE)",
+    )
+    parser.add_argument(
+        "--beta",
+        type=float,
+        default=1.0,
+        help="Beta parameter for VAE (weight of KL divergence term)",
+    )
+    parser.add_argument(
+        "--latent_dim",
+        type=int,
+        default=None,
+        help="Dimension of latent space for VAE (if None, uses encoder output dim)",
+    )
     flags = parser.parse_args()
 
     cwd = __file__
@@ -258,34 +277,45 @@ if __name__ == "__main__":
         checkpoint = torch.load(checkpoint_path, map_location=device)
         print(checkpoint.keys())
 
-    if flags.model == "AE":
-        shape = (
-            dataset_config["SHAPE_PAD"][1:]
-            if (not orig_shape)
-            else dataset_config["SHAPE_ORIG"][1:]
-        )
-        model = CaloEnco(
-            shape,
-            config=dataset_config,
-            training_obj=training_obj,
-            NN_embed=NN_embed,
-            nsteps=dataset_config["NSTEPS"],
-            cold_diffu=False,
-            avg_showers=None,
-            std_showers=None,
-            E_bins=None,
-            resnet_set=flags.resnet_set,
+    if flags.model_type == "VAE":
+        model = CondVAE(
+            out_dim=1,
             layer_sizes=flags.layer_sizes,
+            channels=1,
+            cond_dim=dataset_config["cond_dim"],
+            resnet_block_groups=8,
+            use_convnext=dataset_config["use_convnext"],
+            mid_attn=dataset_config["mid_attn"],
+            block_attn=dataset_config["block_attn"],
+            compress_Z=dataset_config["compress_Z"],
+            convnext_mult=2,
+            cylindrical=dataset_config["cylindrical"],
+            data_shape=dataset_config["data_shape"],
+            time_embed=dataset_config["time_embed"],
+            cond_embed=dataset_config["cond_embed"],
+            resnet_set=flags.resnet_set,
+            compress=dataset_config["compress"],
+            latent_dim=flags.latent_dim
         ).to(device=device)
-
-        # Sometimes save only weights, sometimes save other info
-        if "model_state_dict" in checkpoint.keys():
-            model.load_state_dict(checkpoint["model_state_dict"])
-        elif len(checkpoint.keys()) > 1:
-            model.load_state_dict(checkpoint)
     else:
-        print("Model %s not supported!" % flags.model)
-        exit(1)
+        model = CaloEnco(
+            out_dim=1,
+            layer_sizes=flags.layer_sizes,
+            channels=1,
+            cond_dim=dataset_config["cond_dim"],
+            resnet_block_groups=8,
+            use_convnext=dataset_config["use_convnext"],
+            mid_attn=dataset_config["mid_attn"],
+            block_attn=dataset_config["block_attn"],
+            compress_Z=dataset_config["compress_Z"],
+            convnext_mult=2,
+            cylindrical=dataset_config["cylindrical"],
+            data_shape=dataset_config["data_shape"],
+            time_embed=dataset_config["time_embed"],
+            cond_embed=dataset_config["cond_embed"],
+            resnet_set=flags.resnet_set,
+            compress=dataset_config["compress"],
+        ).to(device=device)
 
     os.system(
         "cp ae_models.py {}".format(checkpoint_folder)
@@ -330,7 +360,9 @@ if __name__ == "__main__":
         for i, param in enumerate(model.parameters()):
             break
         train_loss = 0
-
+        train_recon_loss = 0
+        train_kl_loss = 0
+        
         model.train()
         for i, (E, data) in tqdm(
             enumerate(loader_train, 0), unit="batch", total=len(loader_train)
@@ -345,25 +377,33 @@ if __name__ == "__main__":
                 0, model.nsteps, (data.size()[0],), device=device
             ).long()
 
-            batch_loss = model.compute_loss(
-                data,
-                E,
-                t=t,
-                loss_type="mse",
-                energy_loss_scale=energy_loss_scale,
-            )
-            batch_loss.backward()
+            if flags.model_type == "VAE":
+                recon, mu, log_var = model(data, E, None)
+                recon_loss = criterion(recon, data)
+                kl_loss = model.get_kl_loss(mu, log_var)
+                loss = recon_loss + flags.beta * kl_loss
+                train_recon_loss += recon_loss.item()
+                train_kl_loss += kl_loss.item()
+            else:
+                recon = model(data, E, None)
+                loss = criterion(recon, data)
+                train_recon_loss += loss.item()
+            
+            loss.backward()
 
             optimizer.step()
-            train_loss += batch_loss.item()
+            train_loss += loss.item()
 
-            del data, E, batch_loss
+            del data, E, loss
 
         train_loss = train_loss / len(loader_train)
         training_losses = np.append(training_losses, train_loss)
         print("loss: " + str(train_loss))
 
         val_loss = 0
+        val_recon_loss = 0
+        val_kl_loss = 0
+        
         model.eval()
         for i, (vE, vdata) in tqdm(
             enumerate(loader_val, 0), unit="batch", total=len(loader_val)
@@ -375,16 +415,20 @@ if __name__ == "__main__":
                 0, model.nsteps, (vdata.size()[0],), device=device
             ).long()
 
-            batch_loss = model.compute_loss(
-                vdata,
-                vE,
-                t=t,
-                loss_type="mse",
-                energy_loss_scale=energy_loss_scale,
-            )
-
-            val_loss += batch_loss.item()
-            del vdata, vE, batch_loss
+            if flags.model_type == "VAE":
+                recon, mu, log_var = model(vdata, vE, None)
+                recon_loss = criterion(recon, vdata)
+                kl_loss = model.get_kl_loss(mu, log_var)
+                loss = recon_loss + flags.beta * kl_loss
+                val_recon_loss += recon_loss.item()
+                val_kl_loss += kl_loss.item()
+            else:
+                recon = model(vdata, vE, None)
+                loss = criterion(recon, vdata)
+                val_recon_loss += loss.item()
+            
+            val_loss += loss.item()
+            del vdata, vE, loss
 
         val_loss = val_loss / len(loader_val)
         val_losses = np.append(val_losses, val_loss)
