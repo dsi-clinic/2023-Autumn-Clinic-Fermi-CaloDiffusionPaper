@@ -3,4 +3,5 @@
 *.txt
 *.pyc
 slurm/diffu*
+/.idea
 
