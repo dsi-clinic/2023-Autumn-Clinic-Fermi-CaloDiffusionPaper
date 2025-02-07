@@ -47,7 +47,7 @@ class AutoencoderTrainer:
         self.config = LoadJson(self.args.config)
         self._set_random_seed(set_seed)
         self.train_loader, self.val_loader = self._prepare_datasets(take_subset)
-        self.checkpoint_folder = self._create_checkpoint_folder(take_subset, set_seed)
+        self.checkpoint_folder = self._create_checkpoint_folder(set_seed, take_subset)
         self.nn_embed = self._setup_nn_embedding()
         self.model = self._initialize_model()
         self.optimizer, self.scheduler, self.early_stopper = \
@@ -243,9 +243,9 @@ class AutoencoderTrainer:
         """
         learning_rate = float(self.args.learning_rate[0] if \
                             self.args.learning_rate else self.config["LR"])
-        subset = "subset/" if take_subset else "full_data/"
+        subset = "subset" if take_subset else "full_data"
         random = "deterministic" if set_seed else "random"
-        checkpoint_folder = f"../ae_models/{subset}/{random}" \
+        checkpoint_folder = f"../ae_models/{subset}-{random}/" \
                     f"{self.config['CHECKPOINT_NAME']}_{self.args.model}_" \
                     f"{'-'.join(map(str, self.args.layer_sizes or []))}_" \
                     f"{learning_rate}/"
