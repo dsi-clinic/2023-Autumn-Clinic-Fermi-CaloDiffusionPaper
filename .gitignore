@@ -2,5 +2,7 @@
 *.swp
 *.txt
 *.pyc
+*.stdout
+*.stderr
 slurm/diffu*
-
+*.pth
