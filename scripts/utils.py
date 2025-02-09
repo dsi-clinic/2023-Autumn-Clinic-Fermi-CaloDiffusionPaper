@@ -11,6 +11,7 @@ import joblib
 from sklearn.preprocessing import QuantileTransformer
 import sys
 import os
+from typing import Tuple
 
 #use tqdm if local, skip if batch job
 if sys.stderr.isatty():
@@ -42,8 +43,14 @@ def split_data_np(data, frac=0.8):
     test_data = data[split:]
     return train_data,test_data
 
-def create_phi_image(device, shape = (1,45,16,9)):
-
+def create_phi_image(
+        device: torch.device, shape: tuple[int, int, int, int] = (1,45,16,9)
+        ) -> torch.Tensor:
+    """
+    Creates an array that maps angular positions (phi) around the cylindrical 
+    detector. Combined with the R and Z coordinates, creates a 3D position 
+    reference system for the autoencoer or diffusion model. 
+    """
     n_phi = shape[-2]
     phi_bins = torch.linspace(0., 1., n_phi)
     phi_image = torch.zeros(shape, device = device)
@@ -52,8 +59,15 @@ def create_phi_image(device, shape = (1,45,16,9)):
     return phi_image
 
 
-def create_R_Z_image(device, scaled = True, shape = (1,45,16,9)):
-
+def create_R_Z_image(
+        device: torch.device, 
+        scaled: bool = True, 
+        shape: tuple[int, int, int, int] = (1,45,16,9)
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Generates two tensors representing radial (R) and z-axis (Z) positions. 
+    Different radial binning strategies are used based on the dataset.
+    """
     if(shape[-1] == 30): #dataset 1, photons
         r_bins =  [ 0.,  2.,  4.,  5.,  6.,  8., 10., 12., 15., 20., 25., 30., 40., 50., 60., 70., 80., 90.,  100.,  
                       120., 130.,  150.,  160.,  200.,  250.,  300.,  350.,  400.,  600., 1000., 2000.]
