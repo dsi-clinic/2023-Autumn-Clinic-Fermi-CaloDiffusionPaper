@@ -14,6 +14,7 @@ with open(config_path, "r") as f:
 
 shape = (368,)  # match # of features per shower
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 model = CaloEnco(
     shape,
     config=config,
@@ -42,7 +43,6 @@ print("Autoencoder model loaded successfully.")
 model.eval()
 
 # Load the Reference Data 
-
 reference_hdf5 = "/net/projects/fermi-1/data/dataset_1/dataset_1_photons_1.hdf5"
 
 with h5py.File(reference_hdf5, "r") as f:
@@ -90,5 +90,5 @@ Traceback (most recent call last):
     return forward_call(*args, **kwargs)
   File "/home/kwallace2/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/scripts/autoencoder/ae_models.py", line 100, in forward
     x = F.pad(x, pad=(0, 0, circ_pad, circ_pad, 0, 0), mode="circular")
-RuntimeError: Padding length too large
+RuntimeError: Padding length too large.
 '''
