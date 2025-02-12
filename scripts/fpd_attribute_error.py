@@ -1,83 +1,194 @@
+import argparse
 import torch
 import h5py
 import numpy as np
 import jetnet
 import json
-from CaloEnco import CaloEnco
+from autoencoder.CaloEnco import CaloEnco
+from utils import NNConverter, LoadJson, DataLoader, EarlyStopper, nn
 
-# Paths
-model_dir = "/home/kwallace2/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/scripts/ae_models/dataset1_phot_AE_64_64_64_64_0.0004"
-checkpoint_path = f"{model_dir}/best_val.pth"
-config_path = f"{model_dir}/config_dataset1_photon.json"
-with open(config_path, "r") as f:
-    config = json.load(f)
 
-shape = (368,)  # match # of features per shower
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+import torch.utils.data as torchdata
+import os
+from typing import Tuple, Optional, Dict
 
-model = CaloEnco(
-    shape,
-    config=config,
-    training_obj="mean_pred",
-    nsteps=config.get("NSTEPS", 1000),
-    layer_sizes=config.get("LAYER_SIZES", [64, 64, 64, 64]),
-).to(device)
 
-# Load trained model weights
-# Load checkpoint
-checkpoint = torch.load(checkpoint_path, map_location=device)
-if "model_state_dict" in checkpoint:  
-    checkpoint = checkpoint["model_state_dict"]
+# Setup args
+def setup_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="FPD Metric Evaluation")
+    parser.add_argument(
+        "--model_dir",
+        type=str,
+        default="/home/kwallace2/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/scripts/ae_models/dataset1_phot_AE_64_64_64_64_0.0004",
+        help="Path to the model directory",
+    )
+    # parser.add_argument(
+    #     "--checkpoint_path",
+    #     type=str,
+    #     default="/home/kwallace2/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/scripts/ae_models/dataset1_phot_AE_64_64_64_64_0.0004/best_val.pth",
+    #     help="Path to the checkpoint file",
+    # )
+    # parser.add_argument(
+    #     "--config_path",
+    #     type=str,
+    #     default="/home/kwallace2/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/scripts/ae_models/dataset1_phot_AE_64_64_64_64_0.0004/config_dataset1_photon.json",
+    #     help="Path to the config file",
+    # )
+    parser.add_argument(
+        "--reference_hdf5",
+        type=str,
+        default="/net/projects/fermi-1/data/dataset_1/dataset_1_photons_1.hdf5",
+        help="Path to the reference HDF5 file",
+    )
+    parser.add_argument(
+        "--dataset_dir",
+        type=str,
+        default="/net/projects/fermi-1/data/dataset_1",
+        help="Directory where the dataset is stored.",
+    )
+    return parser.parse_args()
 
-filtered_checkpoint = {k: v for k, v in checkpoint.items() if "NN_embed" not in k}
 
-# Xavier initialization
-with torch.no_grad():
-    if hasattr(model.convTrans, "convTrans"):
-        if model.convTrans.convTrans.weight is not None:
-            torch.nn.init.xavier_uniform_(model.convTrans.convTrans.weight)
-        if model.convTrans.convTrans.bias is not None:
-            model.convTrans.convTrans.bias.zero_()
+def setup_dataset(config: Dict, 
+    data_folder: str, 
+    take_subset: bool = False,
+    val_frac: float=0.2, # TODO: Figure out correct value for default val_frac
+) -> torchdata.DataLoader:
+    """
+    Given a data folder and config dictionary, this function loads the validation
+    dataset and returns a torchdata.DataLoader object.
+    """
+    orig_shape = "orig" in config.get("SHOWER_EMBED", "")
+    shape_pad = config["SHAPE_PAD"]
+    data, energies = [], []
+    for i, dataset in enumerate(config["FILES"]):
+        data_, e_ = DataLoader(
+            os.path.join(data_folder, dataset),
+            shape_pad,
+            emax=config["EMAX"],
+            emin=config["EMIN"],
+            nevts=args.nevts,
+            max_deposit=config[
+                "MAXDEP"
+            ],  # Noise can generate more deposited energy than generated
+            logE=config["logE"],
+            showerMap=config["SHOWERMAP"],
+            nholdout=(
+                config.get("HOLDOUT", 0)
+                if (i == len(config["FILES"]) - 1)
+                else 0
+            ),
+            dataset_num=config.get("DATASET_NUM", 2),
+            orig_shape=orig_shape,
+        )
 
-print("Autoencoder model loaded successfully.")
-model.eval()
+        data = data_ if i == 0 else np.concatenate((data, data_))
+        energies = e_ if i == 0 else np.concatenate((energies, e_))
 
-# Load the Reference Data 
-reference_hdf5 = "/net/projects/fermi-1/data/dataset_1/dataset_1_photons_1.hdf5"
+    # Reshape data based on the SHOWER_EMBED config value
+    energies = np.reshape(energies, (-1))
+    if not orig_shape:
+        data = np.reshape(data, shape_pad)
+    else:
+        data = np.reshape(data, (len(data), -1))
 
-with h5py.File(reference_hdf5, "r") as f:
-    reference_showers = f["showers"][:]  # Shape: (121000, 368)
+    print("DATA SHAPE BEFORE", data.shape, energies.shape)
+    if take_subset:
+        data, energies = data[:500, :], energies[:500]
+        print("DATA SHAPE AFTER", data.shape, energies.shape)
 
-print(f"Reference dataset loaded. Shape: {reference_showers.shape}")
+    torch_data_tensor = torch.from_numpy(data)
+    torch_E_tensor = torch.from_numpy(energies)
 
-# Generate Autoencoder Outputs 
-# Convert reference showers to PyTorch tensor and send to device
-input_tensors = torch.tensor(reference_showers, dtype=torch.float32).to(device)
-print(f"Input tensor shape: {input_tensors.shape}")
+    torch_dataset = torchdata.TensorDataset(torch_E_tensor, torch_data_tensor)
 
-with torch.no_grad():
-    reconstructed_showers = model(input_tensors)
+    # Split into training and validation sets
+    num_data = data.shape[0]
+    nTrain = int(round(self.args.frac * num_data))
+    nVal = num_data - nTrain
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        torch_dataset, [nTrain, nVal]
+    )
 
-reconstructed_showers = reconstructed_showers.cpu().numpy()
+    loader_train = torchdata.DataLoader(
+        train_dataset, batch_size=config["BATCH"], shuffle=True
+    )
+    loader_val = torchdata.DataLoader(
+        val_dataset, batch_size=config["BATCH"], shuffle=True
+    )
 
-print(f"Autoencoder-generated showers shape: {reconstructed_showers.shape}")
+    del data, torch_data_tensor, torch_E_tensor, train_dataset, val_dataset
 
-# Compute FPD Metric Using JetNet 
+    return loader_val
 
-fpd_val, fpd_err = jetnet.evaluation.fpd(
-    real_features=reference_showers,  # Original dataset
-    gen_features=reconstructed_showers  # Autoencoder output
-)
 
-print(f"FPD: {fpd_val:.4f} ± {fpd_err:.4f}")
+def main(args: argparse.Namespace) -> None:
+    # Set up paths relative to model_dir
+    model_dir = args.model_dir
+    checkpoint_path = f"{model_dir}/best_val.pth"
+    config_path = f"{model_dir}/config_dataset1_photon.json"
 
-results_path = f"{model_dir}/fpd_results.txt"
-with open(results_path, "w") as f:
-    f.write(f"FPD Metric: {fpd_val:.6f} ± {fpd_err:.6f}\n")
+    # Load config
+    with open(config_path, "r") as f:
+        config = json.load(f)
 
-print(f"FPD evaluation completed. Results saved to {results_path}.")
+    shape = (368,)  # match # of features per shower
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-'''
+    model = CaloEnco(
+        shape,
+        config=config,
+        training_obj="mean_pred",
+        nsteps=config.get("NSTEPS", 1000),
+        layer_sizes=config.get("LAYER_SIZES", [64, 64, 64, 64]),
+    ).to(device)
+
+    # Load trained model weights
+    # Load checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    if "model_state_dict" in checkpoint:
+        checkpoint = checkpoint["model_state_dict"]
+
+    filtered_checkpoint = {k: v for k, v in checkpoint.items() if "NN_embed" not in k}
+
+    print("Autoencoder model loaded successfully.")
+    model.eval()
+
+    # Load the Validation Dataset
+    dataset = setup_dataset(config=config, data_folder=args.dataset_dir)
+
+    # Generate Autoencoder Outputs
+    model_preds = None # TODO: Init a torch tensor with the correct shape
+    with torch.no_grad():
+        for E, data in loader:
+            # TODO: what is data? what is E? Which one do we want the model to reconstruct?
+            data = data.to(device=self.device)
+            E = E.to(device=self.device)
+
+            # Evaluate the autoencoder on this batch 
+            # TODO: Is this the correct way to call model.pred() ?
+            model_out = model.pred(data, E)
+
+
+            # TODO: write some code to concatenate the model_out's into a single 
+            # pytorch tensor called model_preds
+
+    # TODO: Is it OK to call this once per batch, or does it need to 
+    # be called on all of the dataset at once?
+    fpd_val, fpd_err = jetnet.evaluation.fpd(
+        real_features=None, # TODO: Is this the correct thing to put here?
+        gen_features=model_out
+    )
+
+    # TDOD: write some code
+    results_path = f"{model_dir}/fpd_results.txt"
+    with open(results_path, "w") as f:
+        f.write(f"FPD Metric: {fpd_val:.6f} ± {fpd_err:.6f}\n")
+
+    print(f"FPD evaluation completed. Results saved to {results_path}.")
+
+
+"""
 This code raises: 
 Traceback (most recent call last):
   File "/home/kwallace2/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/CaloChallenge/code/fpd_attribute_error.py", line 59, in <module>
@@ -91,4 +202,9 @@ Traceback (most recent call last):
   File "/home/kwallace2/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/scripts/autoencoder/ae_models.py", line 100, in forward
     x = F.pad(x, pad=(0, 0, circ_pad, circ_pad, 0, 0), mode="circular")
 RuntimeError: Padding length too large.
-'''
+"""
+
+
+if __name__ == "__main__":
+    args = setup_args()
+    main(args)

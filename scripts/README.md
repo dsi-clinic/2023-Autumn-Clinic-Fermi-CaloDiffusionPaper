@@ -14,3 +14,12 @@ This is a markdown file that tabulates files hosted in the scripts folder. It wi
 |consts.py|Hosts all precomputed values for datasets|The entire file is hardcoded with summary statistics for all three datasets, stored in respective dicts|
 |../autoencoder/pca.py|Dimensionality reduction and plotting|line 76, data folder, /net/projects/fermi-1/doug/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/data/dataset_2/ (absolute) <br> line 82, config path, /net/projects/fermi-1/doug/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/configs/config_dataset2.json (absolute) <br> line 86, number of events, default = 1 <br> line 91, binning file /net/projects/fermi-1/doug/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/CaloChallenge/code/binning_dataset_2.xml (absolute) <br> line 95, dataset 2 model location, /net/projects/fermi-1/doug/ae_models/dataset2_AE/downsample_2_8_hrs/final.pth (absolute + external) <br> line 109, figure directory, "./autoencoder/pca_plots/victor_plots/"|
 |plot_E_ratios.py|Generate histograms for energy ratios|line 28, data folder, '/wclustre/cms_mlsim/denoise/CaloChallenge/' <br> line 33, nevents, default = 1 <br> line 34, batch size, default = 100 <br> line 38, sample steps, default = -1, overrides config|
+
+
+### Owen's Notes: Running FPD Eval Script
+
+From the scripts directory, run
+```
+python fpd_attribute_error.py \
+--model_dir /net/projects/fermi-1/kwallace/ae_models/dataset1_phot_AE_64_64_64_64_0.0004
+```
