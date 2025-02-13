@@ -102,6 +102,79 @@ class CylindricalConvTrans(nn.Module):
         return x
 
 
+# Alternative class to CylindricalConvTrans that uses nn.interpolate for upsampling
+
+class CylindricalInterpolate(nn.Module):
+    """
+    Cylindrical 3D Upsampling layer using interpolation optionally followed by a convolution.
+    
+    Assumes input tensor format: (batch_size, channels, z_bin, phi_bin, r_bin).
+
+    This module first applies circular padding along the phi dimension, then upscales the input using 
+    F.interpolate (which can use non-integer scale factors), and finally, optionally applies a standard 
+    3D convolution to introduce learnable weights. This optional convolution can help refine the 
+    upsampled features and mimic the behavior of a transposed convolution.
+
+     Parameters:
+      - dim_in (int): Number of input channels.
+      - dim_out (int): Number of output channels.
+      - kernel_size (tuple): Kernel size for the convolution. Default is (3, 4, 4).
+      - scale_factor (tuple): Scale factor for each spatial dimension for interpolation (can be non-integer,
+                              e.g. (1, 1.5, 1.5)). Default is (1, 2, 2).
+      - groups (int): Number of groups for the convolution. Default is 1.
+      - padding (int or tuple): Padding to use in the convolution. If an integer is provided, it is applied
+                                to all dimensions. Default is 1.
+      - mode (str): Interpolation mode. For 3D data, "trilinear" is typically used for smooth upsampling.
+                    Default is "trilinear".
+      - conv_layer (bool): If True, applies a convolution layer after interpolation to refine features.
+                           If False, only interpolation (with circular padding) is applied. Default is True.
+    """
+    def __init__(
+        self,
+        dim_in,
+        dim_out,
+        kernel_size=(3, 4, 4),
+        scale_factor=(1, 2, 2),
+        groups=1,
+        padding=1,
+        mode="trilinear",
+        conv_layer=True
+    ):
+        super().__init__()
+        # Adjust padding for circular dimension
+        if not isinstance(padding, int):
+            self.padding_orig = copy.copy(padding)
+            padding = list(padding)
+        else:
+            padding = [padding] * 3
+            self.padding_orig = copy.copy(padding)
+
+        padding[1] = kernel_size[1] - 1  # Adjust padding for phi_bin dimension
+        
+        self.scale_factor = scale_factor
+        self.mode = mode
+        self.conv_layer = conv_layer
+        
+        self.conv = nn.Conv3d(
+            dim_in,
+            dim_out,
+            kernel_size=kernel_size,
+            groups=groups,
+            padding=padding  
+        )
+
+    def forward(self, x):
+        """
+        Forward pass that applies padding, uses interpolation to upsample, and
+
+        optionally applies upsampling. 
+        """
+        x = F.pad(x, pad=(0, 0, self.phi_pad, self.phi_pad, 0, 0), mode="circular")
+        x = F.interpolate(x, scale_factor=self.scale_factor, mode=self.mode, align_corners=False)
+        x = self.conv(x) if self.conv_layer else x
+        return x
+
+
 class CylindricalConv(nn.Module):
     """
     Cylindrical 3D Convolution layer.
