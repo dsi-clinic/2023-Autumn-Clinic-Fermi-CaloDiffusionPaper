@@ -4,8 +4,6 @@ import copy
 # import time
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from ae_models import CylindricalConvTrans
 
 # from torch.autograd import Variable
 # from torchinfo import summary
@@ -83,16 +81,6 @@ class CaloEnco(nn.Module):
         self.fully_connected = "FCN" in self.shower_embed
         self.NN_embed = NN_embed
         self.resnet_set = resnet_set
-        self.padding_orig = (0, self.config.get("PADDING_ORIG", 1))
-        self.kernel_size = self.config.get("KERNEL_SIZE", 3)
-        self.convTrans = CylindricalConvTrans(
-            dim_in=1,  # Adjust based on expected input channels
-            dim_out=1,  # Adjust based on output channels
-            kernel_size=(3, 4, 4),  # Match what is used in CylindricalConvTrans
-            stride=(1, 2, 2),
-            padding=(1,1,1),
-            output_padding=0,
-        )
 
         supported = ["mean_pred"]
         is_obj = [s in self.training_obj for s in supported]
@@ -351,7 +339,11 @@ class CaloEnco(nn.Module):
         Returns:
         - original data that's dimensionally reduced into encoded shape (latent space)
         """
-        out = self.model.encode(x, E)
+
+        if self.NN_embed is not None:
+            x = self.NN_embed.enc(x).to(x.device)
+        out = self.model.encode(self.add_RZPhi(x), E)
+
         return out
 
     def decode(self, x, E):
@@ -368,27 +360,7 @@ class CaloEnco(nn.Module):
         """
 
         out = self.model.decode(x, E)
+        if self.NN_embed is not None:
+            out = self.NN_embed.dec(out).to(x.device)
+
         return out
-    
-    def forward(self, x):
-        """
-        Forward pass for the cylindrical transposed convolution.
-        Pads the phi_bin dimension circularly before applying convolution.
-        """
-        import torch.nn.functional as F  # Ensure F is imported
-
-        print(f"Before processing, input shape: {x.shape}")  # Debugging
-
-        # Ensure padding is only applied if the input has enough dimensions
-        if len(x.shape) >= 3:  # Only apply padding if spatial dimensions exist
-            circ_pad = min(self.padding_orig[1], x.shape[-2] // 2)  # Ensure safe padding
-
-            print(f"Applying circular padding: {circ_pad}")  # Debugging
-
-            if circ_pad > 0:
-                x = F.pad(x, pad=(0, 0, circ_pad, circ_pad), mode="circular")
-
-        x = self.convTrans(x)  # Process normally
-
-        return x
-
