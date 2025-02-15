@@ -47,7 +47,7 @@ def cosine_beta_schedule(nsteps, s=0.008):
     return torch.clip(betas, 0.0001, 0.9999)
 
 
-# Custom Convolutional Layers
+# Custom Convolutional Layers.  
 
 
 class CylindricalConvTrans(nn.Module):
@@ -102,76 +102,102 @@ class CylindricalConvTrans(nn.Module):
         return x
 
 
-# Alternative class to CylindricalConvTrans that uses nn.interpolate for upsampling
-
-class CylindricalInterpolate(nn.Module):
+class FractionalResizeLayer(nn.Module):
     """
-    Cylindrical 3D Upsampling layer using interpolation optionally followed by a convolution.
-    
-    Assumes input tensor format: (batch_size, channels, z_bin, phi_bin, r_bin).
+    Applies a Transposed Convolution, then a Convolution to achieve the effect
+    of resizing by a fractional amount. The output size's spatial dimensions is 
+    the fraction times the input size. 
 
-    This module first applies circular padding along the phi dimension, then upscales the input using 
-    F.interpolate (which can use non-integer scale factors), and finally, optionally applies a standard 
-    3D convolution to introduce learnable weights. This optional convolution can help refine the 
-    upsampled features and mimic the behavior of a transposed convolution.
+    Assumes input tensor format: (batch_size, channels, z_bin, phi_bin, r_bin)
 
-     Parameters:
-      - dim_in (int): Number of input channels.
-      - dim_out (int): Number of output channels.
-      - kernel_size (tuple): Kernel size for the convolution. Default is (3, 4, 4).
-      - scale_factor (tuple): Scale factor for each spatial dimension for interpolation (can be non-integer,
-                              e.g. (1, 1.5, 1.5)). Default is (1, 2, 2).
-      - groups (int): Number of groups for the convolution. Default is 1.
-      - padding (int or tuple): Padding to use in the convolution. If an integer is provided, it is applied
-                                to all dimensions. Default is 1.
-      - mode (str): Interpolation mode. For 3D data, "trilinear" is typically used for smooth upsampling.
-                    Default is "trilinear".
-      - conv_layer (bool): If True, applies a convolution layer after interpolation to refine features.
-                           If False, only interpolation (with circular padding) is applied. Default is True.
+    Upsampling Example: 256x256x256 image by 3/2  -> 384x384x384
+    N x C x 256 x 256 x 256 -(numerator=3, denominator=2)> N x C x 384 x 384 x 384 
+
+    Downsampling Example: 384x384x384 image by 2/3  -> 256x256x256
+    N x C x 384 x 384 x 384 -(numerator=2, denominator=3)> N x C x 256 x 256 x 256
     """
-    def __init__(
-        self,
-        dim_in,
-        dim_out,
+    def __init__(self,
+        in_channels,
         kernel_size=(3, 4, 4),
-        scale_factor=(1, 2, 2),
-        groups=1,
-        padding=1,
-        mode="trilinear",
-        conv_layer=True
-    ):
-        super().__init__()
-        # Adjust padding for circular dimension
-        if not isinstance(padding, int):
-            self.padding_orig = copy.copy(padding)
-            padding = list(padding)
-        else:
-            padding = [padding] * 3
-            self.padding_orig = copy.copy(padding)
+        padding=0,  # TODO: do we need different paddings for learned upsampling and learned downsampling
+        output_padding=0,
+        numerator=3, 
+        denominator=2):
 
-        padding[1] = kernel_size[1] - 1  # Adjust padding for phi_bin dimension
-        
-        self.scale_factor = scale_factor
-        self.mode = mode
-        self.conv_layer = conv_layer
-        
-        self.conv = nn.Conv3d(
-            dim_in,
-            dim_out,
+        self.numerator = numerator
+        self.denominator = denominator
+
+        print(self.numerator, self.denominator)
+
+        self.cylinConvTrans = CylindricalConvTrans(
+            in_channels,    
+            in_channels,    # not changing the number of channels
             kernel_size=kernel_size,
-            groups=groups,
-            padding=padding  
+            stride=(numerator, numerator, numerator),
+            padding=padding,
+            output_padding=output_padding
         )
 
-    def forward(self, x):
-        """
-        Forward pass that applies padding, uses interpolation to upsample, and
+        self.cylinConv = CylindricalConv(
+            in_channels, 
+            in_channels,    # not changing the number of channels
+            kernel_size=kernel_size, 
+            stride=denominator, 
+            padding=padding 
+        )
 
-        optionally applies upsampling. 
-        """
-        x = F.pad(x, pad=(0, 0, self.phi_pad, self.phi_pad, 0, 0), mode="circular")
-        x = F.interpolate(x, scale_factor=self.scale_factor, mode=self.mode, align_corners=False)
-        x = self.conv(x) if self.conv_layer else x
+        def forward(self, x):
+            input_shape = x.shape
+            expected_bigger_shape = torch.Size([input_shape[0], 
+                                     input_shape[1], 
+                                     input_shape[2]*numerator, 
+                                     input_shape[3]*numerator, 
+                                     input_shape[4]*numerator])
+            x = self.cylinConvTrans(x)
+            assert x.shape == expected_bigger_shape , (x.shape, expected_bigger_shape)
+            x = self.cylinConv(x)
+            input2_shape = x.shape
+            expected_smaller_shape = torch.Size([input2_shape[0], 
+                                input2_shape[1], 
+                                input2_shape[2]//denominator, 
+                                input2_shape[3]//denominator, 
+                                input2_shape[4]//denominator])
+            assert x.shape == expected_smaller_shape, (x.shape, expected_smaller_shape)
+
+            return x
+        
+
+class FractionalResizeTrilinear(nn.Module):
+    """
+    Resizes an input tensor using nn.interpolate's trilinear mode. Supports 
+    
+    resizing by a fractional amount. The output size's spatial dimensions 
+    is the fraction times the input size. 
+
+    Assumes input tensor format: (batch_size, channels, z_bin, phi_bin, r_bin)
+
+    Upsampling Example: 256x256x256 image by 3/2  -> 384x384x384
+    N x C x 256 x 256 x 256 -(numerator=3, denominator=2)> N x C x 384 x 384 x 384 
+
+    Downsampling Example: 384x384x384 image by 2/3  -> 256x256x256
+    N x C x 384 x 384 x 384 -(numerator=2, denominator=3)> N x C x 256 x 256 x 256
+    """
+    def __init__(self,
+        numerator=3, 
+        denominator=2):
+
+        self.numerator = numerator
+        self.denominator = denominator
+
+        print("CALLED INTERPOLATE", self.numerator, self.denominator)
+
+    def forward(self, x):
+        input_shape = x.shape
+        x = F.interpolate(x, scale_factor=self.numerator/self.denominator)
+        float_dims =  (self.numerator/self.denominator) * input_shape[2:]
+        poss_err_msg = "the fraction * input spatial dimension should be a whole number"
+        assert torch.allclose(float_dims.to(torch.int), float_dims), poss_err_msg
+        
         return x
 
 
@@ -220,6 +246,8 @@ class CylindricalConv(nn.Module):
         x = F.pad(x, pad=(0, 0, circ_pad, circ_pad, 0, 0), mode="circular")
         x = self.conv(x)
         return x
+
+class FractionalConvDownsample(nn.Module):
 
 
 # Residual Block
