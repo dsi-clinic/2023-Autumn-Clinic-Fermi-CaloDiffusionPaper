@@ -393,7 +393,7 @@ class ResnetBlock(nn.Module):
 
 # ConvNeXt Block
 
-#hi
+
 class ConvNextBlock(nn.Module):
     """
     ConvNeXt block with optional conditional embedding.
