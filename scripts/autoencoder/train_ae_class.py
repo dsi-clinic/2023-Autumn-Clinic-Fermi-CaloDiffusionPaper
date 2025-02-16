@@ -513,5 +513,5 @@ class AutoencoderTrainer:
         self._save_model("final.pth")
 
 if __name__ == "__main__":
-    trainer = AutoencoderTrainer(set_seed=True, take_subset=False)
+    trainer = AutoencoderTrainer(set_seed=True, take_subset=True)
     trainer.train()
