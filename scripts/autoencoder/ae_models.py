@@ -1,4 +1,5 @@
 from enum import Enum
+from fractions import Fraction
 from einops import rearrange
 import copy
 import math
@@ -201,11 +202,43 @@ class FractionalResizeTrilinear(nn.Module):
         return x
 
 class ResizeMethod(Enum):
-    SIMPLE_INT_CONV = "simple-int-convolution"
-    CYLIN_CONV = "cylindrical-convolution"
+    """
+    Enum for different tensor resizing methods. CYLIN_FRAC_LEARNED and 
+    CYLIN_FRAC_INTERPOLATE are options that allow for more flexibility in 
+    upsampling and downsampling. 
+
+    SIMPLE_INT_CONV: Uses pytorch's nn.Conv3d for a convolution layer or 
+        nn.ConvTranspose3d for a transposed convolution layer. No padding applied
+        beforehand, and only allows compression by an integer factor.
+    CYLIN_INT_CONV: Uses CylindricalConv for a convolution layer or 
+        CylindricalConvTrans for a transposed convolution layer. Padding is applied
+        beforehand, and only allows compression by an integer factor.
+    CYLIN_FRAC_LEARNED: Applies both convolution and transposed convolutions 
+        for one resizing step. Padding is applied, and this combo allows for 
+        the effect of fractional strides.
+    CYLIN_FRAC_INTERPOLATE: For one resizing step, uses only pytorch's 
+        nn.interpolate, but this function does not learn any parameters. Padding
+        is applied, and this combo allows for the effect of fractional strides.
+    """
+    SIMPLE_INT_CONV = "simple-int-conv"
+    CYLIN_INT_CONV = "cylindrical-int-conv"
     CYLIN_FRAC_LEARNED = "cylindrical-frac-learned"
     CYLIN_FRAC_INTERPOLATE =  "cylindrical-frac-interpolate"
 
+def enum_to_resize_class(resize_method):
+    """
+    Choose class to resize tensors for upsampling/downsampling based on the 
+    given resize method enum.
+    """
+    if resize_method == ResizeMethod.SIMPLE_INT_CONV: 
+        return nn.Conv3d
+    elif resize_method == ResizeMethod.CYLIN_INT_CONV:
+        return CylindricalConv
+    elif resize_method == ResizeMethod.CYLIN_FRAC_LEARNED:
+        return FractionalResizeLayer
+    else:
+        return FractionalResizeTrilinear
+    
 class CylindricalConv(nn.Module):
     """
     Cylindrical 3D Convolution layer.
@@ -594,13 +627,14 @@ def Upsample(
         )
 
 
-def Downsample(dim, cylindrical=False, compress_Z=False, compress=2):
+def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV, 
+               compress_Z=False, compress=2):
     """
     Downsampling layer in 2 dimensions while optionally compressing the Z dimension.
 
     Parameters:
     - dim (int): Input dimension.
-    - cylindrical (bool): Whether to use cylindrical convolution.
+    - resize_method (enum): which conv/interpolate method to use for downsampling.
     - compress_Z (bool): Whether to adjust Z-dimension downsampling.
     - compress (float): Compression factor
 
@@ -608,7 +642,16 @@ def Downsample(dim, cylindrical=False, compress_Z=False, compress=2):
     - nn.Module: Downsampling layer.
     """
     Z_stride = compress if compress_Z else 1
-    if cylindrical:
+    if resize_method == ResizeMethod.SIMPLE_INT_CONV: 
+        return nn.Conv3d(
+            dim,
+            dim,
+            kernel_size=(3, 4, 4),
+            stride=(Z_stride, compress, compress),
+            padding=1,
+        )
+    
+    if resize_method == ResizeMethod.CYLIN_INT_CONV:
         return CylindricalConv(
             dim,
             dim,
@@ -617,13 +660,20 @@ def Downsample(dim, cylindrical=False, compress_Z=False, compress=2):
             padding=1,
         )
     else:
-        return nn.Conv3d(
-            dim,
-            dim,
-            kernel_size=(3, 4, 4),
-            stride=(Z_stride, compress, compress),
-            padding=1,
-        )
+        # Methods to achieve a non-integer compression factor
+        fraction = Fraction(compress).limit_denominator()
+        if resize_method == ResizeMethod.CYLIN_FRAC_LEARNED:
+            return FractionalResizeLayer(in_channels=dim, 
+                                        kernel_size=(3,4,4),
+                                        padding=0,
+                                        output_padding=0,
+                                        numerator=fraction.numerator,
+                                        denominator=fraction.denominator
+                                        )
+        else:
+            return FractionalResizeTrilinear(numerator=fraction.numerator, 
+                                             denominator=fraction.denominator)
+    
     # Alternative using average pooling
     # return nn.AvgPool3d(kernel_size=(1,2,2), stride=(1,2,2), padding=0)
 
@@ -737,7 +787,7 @@ class CondAE(nn.Module):
     - mid_attn (bool): whether to add attention blocks in between Resnet + Downsample combos in UNet
     - compress_Z (bool): indicates need to adjust z-dimension downsampling for consistency
     - convnext_mult (int): groupnorm output dimension multiplier
-    - cylindrical (bool): indicates whether convolutions are cylindrical or not
+    - resize_method (str): method of resizing that specifies if convolution layers vs. interpolate will be used and if padding will be added beforehand
     - data_shape (tuple): shape of input data samples
     - time_embed (bool): whether to embed time for UNet
     - cond_embed (bool): whether to embed energy
@@ -757,7 +807,7 @@ class CondAE(nn.Module):
         block_attn=False,
         compress_Z=False,
         convnext_mult=2,
-        cylindrical=False,
+        resize_method="cylindrical-int-conv",
         data_shape=(-1, 1, 45, 16, 9),
         time_embed=True,
         cond_embed=True,
@@ -780,15 +830,20 @@ class CondAE(nn.Module):
 
         in_out = list(zip(layer_sizes[:-1], layer_sizes[1:]))
 
-        # Initialize convolutions as cylindrical or not
-        if not cylindrical:
+
+        self.resize_method = ResizeMethod(resize_method)
+
+        # Initial convolution as Conv3d or CylindricalConv
+        if self.resize_method == ResizeMethod.SIMPLE_INT_CONV:
             self.init_conv = nn.Conv3d(
                 channels, layer_sizes[0], kernel_size=3, padding=1
             )
+            cylindrical=False
         else:
             self.init_conv = CylindricalConv(
                 channels, layer_sizes[0], kernel_size=3, padding=1
             )
+            cylindrical=True
 
         # Chose block type (ResNet or ConvNeXt)
         if use_convnext:
