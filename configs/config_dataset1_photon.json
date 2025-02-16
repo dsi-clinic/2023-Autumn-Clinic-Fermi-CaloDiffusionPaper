@@ -31,7 +31,8 @@
     'ECUT':0.0000001,
     'logE':True,
     'MAXDEP':3.1,
-    'RESIZE_METHOD' : 'cylindrical-frac-interpolate'
+    'RESIZE_METHOD' : 'cylindrical-frac-interpolate',
+    'COMPRESS_FACTOR' : 1.5,
     'SHOWERMAP': 'logit-norm',
     'R_Z_INPUT': True,
     'PHI_INPUT': True,
