@@ -840,12 +840,12 @@ class CondAE(nn.Module):
             self.init_conv = nn.Conv3d(
                 channels, layer_sizes[0], kernel_size=3, padding=1
             )
-            cylindrical=False
+            cylindrical=False   
         else:
             self.init_conv = CylindricalConv(
                 channels, layer_sizes[0], kernel_size=3, padding=1
             )
-            cylindrical=True
+            cylindrical=True    # Used to inform instantiation of blocks
 
         # Chose block type (ResNet or ConvNeXt)
         if use_convnext:
