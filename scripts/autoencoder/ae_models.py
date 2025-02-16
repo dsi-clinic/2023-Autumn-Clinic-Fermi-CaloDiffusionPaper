@@ -1,4 +1,4 @@
-# some pytorch modules & useful functions
+from enum import Enum
 from einops import rearrange
 import copy
 import math
@@ -200,6 +200,11 @@ class FractionalResizeTrilinear(nn.Module):
         
         return x
 
+class ResizeMethod(Enum):
+    SIMPLE_INT_CONV = "simple-int-convolution"
+    CYLIN_CONV = "cylindrical-convolution"
+    CYLIN_FRAC_LEARNED = "cylindrical-frac-learned"
+    CYLIN_FRAC_INTERPOLATE =  "cylindrical-frac-interpolate"
 
 class CylindricalConv(nn.Module):
     """
@@ -246,8 +251,6 @@ class CylindricalConv(nn.Module):
         x = F.pad(x, pad=(0, 0, circ_pad, circ_pad, 0, 0), mode="circular")
         x = self.conv(x)
         return x
-
-class FractionalConvDownsample(nn.Module):
 
 
 # Residual Block
