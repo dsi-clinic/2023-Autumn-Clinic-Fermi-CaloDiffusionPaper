@@ -225,19 +225,6 @@ class ResizeMethod(Enum):
     CYLIN_FRAC_LEARNED = "cylindrical-frac-learned"
     CYLIN_FRAC_INTERPOLATE =  "cylindrical-frac-interpolate"
 
-def enum_to_resize_class(resize_method):
-    """
-    Choose class to resize tensors for upsampling/downsampling based on the 
-    given resize method enum.
-    """
-    if resize_method == ResizeMethod.SIMPLE_INT_CONV: 
-        return nn.Conv3d
-    elif resize_method == ResizeMethod.CYLIN_INT_CONV:
-        return CylindricalConv
-    elif resize_method == ResizeMethod.CYLIN_FRAC_LEARNED:
-        return FractionalResizeLayer
-    else:
-        return FractionalResizeTrilinear
     
 class CylindricalConv(nn.Module):
     """
@@ -588,7 +575,8 @@ class PreNorm(nn.Module):
 
 
 def Upsample(
-    dim, extra_upsample=[0, 0, 0], cylindrical=False, compress_Z=False, compress=2
+    dim, extra_upsample=[0, 0, 0], resize_method=ResizeMethod.CYLIN_INT_CONV,
+    compress_Z=False, compress=2
 ):
     """
     Upsampling layer in 2 dimensions while optionally compressing the Z dimension.
@@ -596,7 +584,7 @@ def Upsample(
     Parameters:
     - dim (int): Input dimension.
     - extra_upsample (list): Additional output padding for upsampling.
-    - cylindrical (bool): Whether to use cylindrical convolution.
+    - resize_method (enum): which conv/interpolate method to use for upsampling.
     - compress_Z (bool): Whether to adjust Z-dimension upsampling.
     - compress (float): compression factor
 
@@ -607,7 +595,7 @@ def Upsample(
     Z_kernel = 4 if extra_upsample[0] > 0 else 3
 
     extra_upsample[0] = 0  # Ensure Z-dimension extra upsample is zero
-    if cylindrical:
+    if resize_method == ResizeMethod.CYLIN_INT_CONV:
         return CylindricalConvTrans(
             dim,
             dim,
@@ -616,7 +604,8 @@ def Upsample(
             padding=1,
             output_padding=extra_upsample,
         )
-    else:
+    
+    if resize_method == ResizeMethod.SIMPLE_INT_CONV:
         return nn.ConvTranspose3d(
             dim,
             dim,
@@ -625,6 +614,20 @@ def Upsample(
             padding=1,
             output_padding=extra_upsample,
         )
+
+    # Methods to achieve a non-integer compression factor
+    fraction = Fraction(compress).limit_denominator()
+    if resize_method == ResizeMethod.CYLIN_FRAC_LEARNED:
+        return FractionalResizeLayer(in_channels=dim, 
+                                    kernel_size=(3,4,4),
+                                    padding=0,
+                                    output_padding=0,
+                                    numerator=fraction.numerator,
+                                    denominator=fraction.denominator
+                                    )
+    
+    return FractionalResizeTrilinear(numerator=fraction.numerator, 
+                                        denominator=fraction.denominator)
 
 
 def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV, 
@@ -659,20 +662,19 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
             stride=(Z_stride, compress, compress),
             padding=1,
         )
-    else:
-        # Methods to achieve a non-integer compression factor
-        fraction = Fraction(compress).limit_denominator()
-        if resize_method == ResizeMethod.CYLIN_FRAC_LEARNED:
-            return FractionalResizeLayer(in_channels=dim, 
-                                        kernel_size=(3,4,4),
-                                        padding=0,
-                                        output_padding=0,
-                                        numerator=fraction.numerator,
-                                        denominator=fraction.denominator
-                                        )
-        else:
-            return FractionalResizeTrilinear(numerator=fraction.numerator, 
-                                             denominator=fraction.denominator)
+    # Methods to achieve a non-integer compression factor
+    fraction = Fraction(compress).limit_denominator()
+    if resize_method == ResizeMethod.CYLIN_FRAC_LEARNED:
+        return FractionalResizeLayer(in_channels=dim, 
+                                    kernel_size=(3,4,4),
+                                    padding=0,
+                                    output_padding=0,
+                                    numerator=fraction.numerator,
+                                    denominator=fraction.denominator
+                                    )
+    
+    return FractionalResizeTrilinear(numerator=fraction.numerator, 
+                                        denominator=fraction.denominator)
     
     # Alternative using average pooling
     # return nn.AvgPool3d(kernel_size=(1,2,2), stride=(1,2,2), padding=0)
