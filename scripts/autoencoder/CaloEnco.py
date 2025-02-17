@@ -239,7 +239,7 @@ class CaloEnco(nn.Module):
         self,
         data: torch.Tensor,             # Input data batch 
         energy: torch.Tensor,           # Energy values for conditioning
-        t: Optional[torch.Tesnor]=None, # Timestamps
+        t: Optional[torch.Tensor]=None, # Timestamps
         loss_type: str="mse",           # Currently only MSE loss supported
         rnd_normal: Optional[torch.Tensor]=None,   # Random noise, helpful for reproducability
         energy_loss_scale: float =1e-2,  # Scale factor for energy conservation loss
