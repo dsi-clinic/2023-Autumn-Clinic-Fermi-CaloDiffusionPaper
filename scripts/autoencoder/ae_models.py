@@ -197,7 +197,10 @@ class FractionalResizeTrilinear(nn.Module):
     def forward(self, x):
         input_shape = x.shape
         x = F.interpolate(x, scale_factor=self.numerator/self.denominator)
-        float_dims =  (self.numerator/self.denominator) * input_shape[2:]
+        print("What happened before and after interpolate", input_shape, x.shape)
+        spatial_dimensions = torch.tensor(input_shape[2:], dtype=torch.float)
+        float_dims =  (self.numerator/self.denominator) * spatial_dimensions
+        print("DEBUG", spatial_dimensions, float_dims, self.numerator, self.denominator)
         poss_err_msg = "the fraction * input spatial dimension should be a whole number"
         assert torch.allclose(float_dims.to(torch.int), float_dims), poss_err_msg
         
@@ -666,6 +669,7 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
         )
     # Methods to achieve a non-integer compression factor
     fraction = Fraction(compress).limit_denominator()
+    print("DOWNSAMPLE", fraction.numerator, fraction.denominator)
     if resize_method == ResizeMethod.CYLIN_FRAC_LEARNED:
         return FractionalResizeLayer(in_channels=dim, 
                                     kernel_size=(3,4,4),
@@ -674,9 +678,9 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
                                     numerator=fraction.numerator,
                                     denominator=fraction.denominator
                                     )
-    
-    return FractionalResizeTrilinear(numerator=fraction.numerator, 
-                                        denominator=fraction.denominator)
+    # we swap numerator and denom. to downsample. 1.5 as compress -> num.=2, denom.=3
+    return FractionalResizeTrilinear(numerator=fraction.denominator, 
+                                        denominator=fraction.numerator)
     
     # Alternative using average pooling
     # return nn.AvgPool3d(kernel_size=(1,2,2), stride=(1,2,2), padding=0)
