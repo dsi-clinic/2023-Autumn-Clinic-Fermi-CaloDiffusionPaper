@@ -12,7 +12,7 @@
 source /home/${USER}/.bashrc
 source activate fermi
 
-python3 scripts/autoencoder/train_ae.py \
+python3 scripts/autoencoder/train_ae_class.py \
     --data_folder /net/projects/fermi-1/data/dataset_1 \
     --config /home/${USER}/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/configs/config_dataset1_photon.json \
 	--binning_file /home/${USER}/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/CaloChallenge/code/binning_dataset_1_photons.xml \
