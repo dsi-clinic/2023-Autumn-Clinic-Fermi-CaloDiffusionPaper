@@ -1,15 +1,9 @@
+from typing import Optional
 import numpy as np
 import copy
-
-# import time
 import torch
 import torch.nn as nn
-
-# from torch.autograd import Variable
-# from torchinfo import summary
 import sys
-
-# import os
 
 try:
     from ae_models import cosine_beta_schedule, FCN, CondAE
@@ -81,31 +75,44 @@ class CaloEnco(nn.Module):
         self.fully_connected = "FCN" in self.shower_embed
         self.NN_embed = NN_embed
         self.resnet_set = resnet_set
+        self.verbose = 1
 
+        self._validate_training_obj()
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self._init_noise_schedule()
+
+        # Set up embedding settings for time and energy conditioning
+        self.time_embed = config.get("TIME_EMBED", "sin")
+        self.E_embed = config.get("COND_EMBED", "sin")
+
+        # Initialize model architecture based on configuration
+        cond_dim = config["COND_SIZE_UNET"]
+        if layer_sizes is None:
+            layer_sizes = config["LAYER_SIZE_UNET"]
+
+        self._init_model_architecture(cond_dim, layer_sizes)
+
+    def _validate_training_obj(self):
+        """Ensure that the training objective is supported."""
         supported = ["mean_pred"]
-        is_obj = [s in self.training_obj for s in supported]
-        if not any(is_obj):
+        if not any(s in self.training_obj for s in supported):
             print("Training objective %s not supported!" % self.training_obj)
             exit(1)
 
-        if config is None:
-            raise ValueError("Config file not given")
-
-        self.verbose = 1
-
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-        else:
-            device = torch.device("cpu")
-
-        # Linear schedule
-        schedd = config.get("NOISE_SCHED", "linear")
+    def _init_noise_schedule(self):
+        """
+        Initialize the noise schedule and compute diffusion quantities to be used
+        in the context of latent diffusion.
+        """
+        schedd = self.config.get("NOISE_SCHED", "linear")
         self.discrete_time = True
 
         if "linear" in schedd:
             self.betas = torch.linspace(
-                self.beta_start, self.beta_end, self.nsteps
-            )
+                self.config["BETA_START"], self.config["BETA_END"], self.nsteps
+                )
         elif "cosine" in schedd:
             self.betas = cosine_beta_schedule(self.nsteps)
         elif "log" in schedd:
@@ -113,101 +120,92 @@ class CaloEnco(nn.Module):
             self.P_mean = -1.5
             self.P_std = 1.5
         else:
-            print("Invalid NOISE_SCHEDD param %s" % schedd)
+            print("Invalid NOISE_SCHED param %s" % schedd)
             exit(1)
 
         if self.discrete_time:
             # Precompute useful quantities for training
             self.alphas = 1.0 - self.betas
             self.alphas_cumprod = torch.cumprod(self.alphas, axis=0)
-
             # Shift all elements over by inserting unit value in first place
             alphas_cumprod_prev = torch.nn.functional.pad(
                 self.alphas_cumprod[:-1], (1, 0), value=1.0
-            )
-
+                )
             self.sqrt_recip_alphas = torch.sqrt(1.0 / self.alphas)
             self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
             self.sqrt_one_minus_alphas_cumprod = torch.sqrt(
                 1.0 - self.alphas_cumprod
-            )
-
+                )
             self.posterior_variance = (
-                self.betas
-                * (1.0 - alphas_cumprod_prev)
-                / (1.0 - self.alphas_cumprod)
+                self.betas * (1.0 - alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
             )
 
-        self.time_embed = config.get("TIME_EMBED", "sin")
-        self.E_embed = config.get("COND_EMBED", "sin")
-        cond_dim = config["COND_SIZE_UNET"]
-        if layer_sizes is None:
-            layer_sizes = config["LAYER_SIZE_UNET"]
-        block_attn = config.get("BLOCK_ATTN", False)
-        mid_attn = config.get("MID_ATTN", False)
-        compress_Z = config.get("COMPRESS_Z", False)
-
+    def _init_model_architecture(self, cond_dim, layer_sizes):
+        """
+        Set the model attribute to either be a Fully Connected Network
+        or a Conditional Autoencoder. For the CondAE, 
+        """
         if self.fully_connected:
             # Fully connected network architecture
             self.model = FCN(
                 cond_dim=cond_dim,
-                dim_in=config["SHAPE_ORIG"][1],
-                num_layers=config["NUM_LAYERS_LINEAR"],
+                dim_in=self.config["SHAPE_ORIG"][1],
+                num_layers=self.config["NUM_LAYERS_LINEAR"],
                 cond_embed=(self.E_embed == "sin"),
                 time_embed=(self.time_embed == "sin"),
             )
-
             self.R_Z_inputs = False
-
-            # summary_shape = [[1, config["SHAPE_ORIG"][1]], [1], [1]]
-
         else:
-            RZ_shape = config["SHAPE_PAD"][1:]
-
-            self.R_Z_inputs = config.get("R_Z_INPUT", False)
-            self.phi_inputs = config.get("PHI_INPUT", False)
+            RZ_shape = self.config["SHAPE_PAD"][1:]
+            self.R_Z_inputs = self.config.get("R_Z_INPUT", False)
+            self.phi_inputs = self.config.get("PHI_INPUT", False)
 
             in_channels = 1
-
+            # Maps for where the data is positioned in the R,Z,Phi dimension
             self.R_image, self.Z_image = create_R_Z_image(
-                device, scaled=True, shape=RZ_shape
-            )
-            self.phi_image = create_phi_image(device, shape=RZ_shape)
+                self.device, scaled=True, shape=RZ_shape)
+            self.phi_image = create_phi_image(self.device, shape=RZ_shape)
 
             if self.R_Z_inputs:
+                # R, Z, and actual data
                 in_channels = 3
-
             if self.phi_inputs:
+                # Adds phi as another channel if needed
                 in_channels += 1
 
+            # Include position channels (R, Z, phi) alongside the data
             calo_summary_shape = list(copy.copy(RZ_shape))
             calo_summary_shape.insert(0, 1)
             calo_summary_shape[1] = in_channels
-
             calo_summary_shape[0] = 1
-            # summary_shape = [calo_summary_shape, [1], [1]]
 
             self.model = CondAE(
                 cond_dim=cond_dim,
                 out_dim=1,
                 channels=in_channels,
                 layer_sizes=layer_sizes,
-                block_attn=block_attn,
-                mid_attn=mid_attn,
-                cylindrical=config.get("CYLINDRICAL", False),
-                compress_Z=compress_Z,
+                block_attn=self.config.get("BLOCK_ATTN", False),
+                mid_attn=self.config.get("MID_ATTN", False),
+                cylindrical=self.config.get("CYLINDRICAL", False),
+                compress_Z=self.config.get("COMPRESS_Z", False),
                 data_shape=calo_summary_shape,
                 cond_embed=(self.E_embed == "sin"),
-                time_embed=False,
+                time_embed=False,  # Time embeddings removed to match sizes
                 resnet_set=self.resnet_set,
-                compress=config.get("COMPRESS_FACTOR", 2),
-            )  # Removed time embeddings to match sizes
+                compress=self.config.get("COMPRESS_FACTOR", 2),
+            )
 
     # Wrapper for backwards compatability
     def load_state_dict(self, d):
         return super().load_state_dict(d)
 
-    def add_RZPhi(self, x):
+    def add_RZPhi(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Adds position information (radial, z-axis, angular dimensions) as extra
+        channels to the input, so the autoencoder can know where each data point 
+        is in the cylindrical space. If position channels aren't requested, 
+        returns the orignal data unchanged.
+        """
         cats = [x]
         if self.R_Z_inputs:
 
@@ -239,14 +237,20 @@ class CaloEnco(nn.Module):
 
     def compute_loss(
         self,
-        data,
-        energy,
-        t=None,
-        loss_type="mse",
-        rnd_normal=None,
-        energy_loss_scale=1e-2,
-    ):
-
+        data: torch.Tensor,             # Input data batch 
+        energy: torch.Tensor,           # Energy values for conditioning
+        t: Optional[torch.Tensor]=None, # Timestamps
+        loss_type: str="mse",           # Currently only MSE loss supported
+        rnd_normal: Optional[torch.Tensor]=None,   # Random noise, helpful for reproducability
+        energy_loss_scale: float =1e-2,  # Scale factor for energy conservation loss
+    ) -> torch.Tensor:
+        """
+        Computes the training loss for the model. Handles both discrete and 
+        continuous time cases. MSE loss is calculated between prediction and 
+        targets, with the option to include an additional energy conservation
+        loss term weighted by energy_loss_scale. The training objective also
+        influences how the loss is computed.
+        """
         if self.discrete_time:
             if t is None:
                 t = torch.randint(
@@ -318,13 +322,28 @@ class CaloEnco(nn.Module):
             else:
                 return sigma
 
-    def pred(self, x, E, t_emb):
-
+    def pred(
+        self, 
+        x: torch.Tensor,        # Input data batch
+        E: torch.Tensor,        # Energy values
+        t_emb: torch.Tensor,    # Time embeddings
+        ) -> torch.Tensor:
+        """
+        Optionally uses the neural network embedding that converts irregular 
+        geometries to regular ones and adds position information to the data 
+        before returning the Autoencoder model's prediction.
+        """
+        # Encoding step
         if self.NN_embed is not None:
             x = self.NN_embed.enc(x).to(x.device)
+
+        # Autoencoder model prediction
         out = self.model(self.add_RZPhi(x), E, t_emb)
+
+        # Decoding step
         if self.NN_embed is not None:
             out = self.NN_embed.dec(out).to(x.device)
+
         return out
 
     def encode(self, x, E):
