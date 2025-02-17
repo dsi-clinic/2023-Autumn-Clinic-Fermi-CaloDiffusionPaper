@@ -125,6 +125,7 @@ class FractionalResizeLayer(nn.Module):
         numerator=3, 
         denominator=2):
 
+        super().__init__()
         self.numerator = numerator
         self.denominator = denominator
 
@@ -187,6 +188,7 @@ class FractionalResizeTrilinear(nn.Module):
         numerator=3, 
         denominator=2):
 
+        super().__init__()
         self.numerator = numerator
         self.denominator = denominator
 
@@ -1029,10 +1031,10 @@ class CondAE(nn.Module):
         - torch.Tensor: Reconstructed data tensor
         """
         # Generate energy embeddings
-        # print(f"Start: {x.shape}", flush=True)
+        print(f"Start: {x.shape}", flush=True)
         conditions = self.cond_mlp(cond)
         x = self.init_conv(x)  # Convolution
-        # print(f"Initial Conv: {x.shape}", flush=True)
+        print(f"Initial Conv: {x.shape}", flush=True)
 
         # Downsample
         for i, (block1, block2, downsample) in enumerate(self.downs):
@@ -1041,7 +1043,7 @@ class CondAE(nn.Module):
             if self.block_attn:
                 x = self.downs_attn[i](x)
             x = downsample(x)
-            # print(f"Downsample {i + 1}: {x.shape}", flush=True)
+            print(f"Downsample {i + 1}: {x.shape}", flush=True)
 
         # Bottleneck
         x = self.mid_block1(x, conditions)
@@ -1050,7 +1052,7 @@ class CondAE(nn.Module):
             x = self.mid_attn(x)
             # print(f"Bottleneck Attention: {x.shape}", flush=True)
         x = self.mid_block2(x, conditions)
-        # print(f"Bottleneck 2: {x.shape}", flush=True)
+        print(f"Bottleneck 2: {x.shape}", flush=True)
 
         # Upsample
         for i, (block1, block2, upsample) in enumerate(self.ups):
@@ -1059,10 +1061,10 @@ class CondAE(nn.Module):
             if self.block_attn:
                 x = self.ups_attn[i](x)
             x = upsample(x)
-            # print(f"Upsample {i + 1}: {x.shape}", flush=True)
+            print(f"Upsample {i + 1}: {x.shape}", flush=True)
 
         x = self.final_conv(x)
-        # print(f"Final Conv: {x.shape}", flush=True)
+        print(f"Final Conv: {x.shape}", flush=True)
         return x
 
     def encode(self, x, cond):
