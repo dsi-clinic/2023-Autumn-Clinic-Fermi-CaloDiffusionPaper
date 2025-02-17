@@ -194,7 +194,7 @@ class CaloEnco(nn.Module):
                 layer_sizes=layer_sizes,
                 block_attn=block_attn,
                 mid_attn=mid_attn,
-                resize_method=config.get("RESIZE_METHOD", "cylindrical-convolution"),
+                resize_method=config.get("RESIZE_METHOD", "cylindrical-int-conv"),
                 compress_Z=compress_Z,
                 data_shape=calo_summary_shape,
                 cond_embed=(self.E_embed == "sin"),
