@@ -93,13 +93,16 @@ class CylindricalConvTrans(nn.Module):
 
         Pads the phi_bin dimension circularly before applying convolution.
         """
+        print("CylindricalConvTrans forward x shape: ", x.shape)
         # Circular padding for the phi_bin dimension
         # Out size is : O = (i-1)*S + K - 2P
         # To achieve 'same' use padding P = ((S-1)*W-S+F)/2, with F = filter size, S = stride, W = input size
         # Pad last dim with nothing, 2nd to last dim is circular one
         circ_pad = self.padding_orig[1]
         x = F.pad(x, pad=(0, 0, circ_pad, circ_pad, 0, 0), mode="circular")
+        print("F.pad called w/", (0,0,circ_pad, circ_pad, 0, 0), "new shape: ", x.shape)
         x = self.convTrans(x)
+        print("shape after calling convTrans w/ padding", self.padding_orig, ":", x.shape)
         return x
 
 
@@ -192,17 +195,22 @@ class FractionalResizeTrilinear(nn.Module):
         self.numerator = numerator
         self.denominator = denominator
 
-        print("CALLED INTERPOLATE", self.numerator, self.denominator)
-
     def forward(self, x):
         input_shape = x.shape
+        divisor = max(self.numerator, self.denominator)
+        # Calculate padding needed for each dimension
+        pad_z = (divisor - (input_shape[2] % divisor)) % divisor
+        pad_phi = (divisor - (input_shape[3] % divisor)) % divisor
+        pad_r = (divisor - (input_shape[4] % divisor)) % divisor
+        print("Input shape: ", x.shape)
+        x = F.pad(x, (0, pad_z, 0, pad_phi, 0, pad_r), mode='circular')
+        print("Shape after circular padding: ", x.shape)
         x = F.interpolate(x, scale_factor=self.numerator/self.denominator)
-        print("What happened before and after interpolate", input_shape, x.shape)
-        spatial_dimensions = torch.tensor(input_shape[2:], dtype=torch.float)
-        float_dims =  (self.numerator/self.denominator) * spatial_dimensions
-        print("DEBUG", spatial_dimensions, float_dims, self.numerator, self.denominator)
-        poss_err_msg = "the fraction * input spatial dimension should be a whole number"
-        assert torch.allclose(float_dims.to(torch.int), float_dims), poss_err_msg
+        print("Shape after interpolate: ", x.shape)
+        # spatial_dimensions = torch.tensor(input_shape[2:], dtype=torch.float)
+        # float_dims =  (self.numerator/self.denominator) * spatial_dimensions
+        # poss_err_msg = "the fraction * input spatial dimension should be a whole number"
+        # assert torch.allclose(float_dims.to(torch.int), float_dims), poss_err_msg
         
         return x
 
@@ -229,6 +237,9 @@ class ResizeMethod(Enum):
     CYLIN_INT_CONV = "cylindrical-int-conv"
     CYLIN_FRAC_LEARNED = "cylindrical-frac-learned"
     CYLIN_FRAC_INTERPOLATE =  "cylindrical-frac-interpolate"
+
+    def __str__(self):
+        return self.value
 
     
 class CylindricalConv(nn.Module):
@@ -272,9 +283,12 @@ class CylindricalConv(nn.Module):
         # Circular padding for the phi_bin dimension
         # To achieve 'same' use padding P = ((S-1)*W-S+F)/2, with F = filter size, S = stride, W = input size
         # Pad last dim with nothing, 2nd to last dim is circular one
+        print("CylindricalConv forward x shape: ", x.shape)
         circ_pad = self.padding_orig[1]
         x = F.pad(x, pad=(0, 0, circ_pad, circ_pad, 0, 0), mode="circular")
+        print("F.pad circular mode called with", (0,0,circ_pad, circ_pad, 0, 0), "now: ", x.shape)
         x = self.conv(x)
+        print("shape after calling conv w/ padding", self.padding_orig, ":", x.shape)
         return x
 
 
@@ -649,6 +663,7 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
     Returns:
     - nn.Module: Downsampling layer.
     """
+    print("resize method of:", resize_method, type(resize_method))
     Z_stride = compress if compress_Z else 1
     if resize_method == ResizeMethod.SIMPLE_INT_CONV: 
         return nn.Conv3d(
@@ -669,7 +684,7 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
         )
     # Methods to achieve a non-integer compression factor
     fraction = Fraction(compress).limit_denominator()
-    print("DOWNSAMPLE", fraction.numerator, fraction.denominator)
+
     if resize_method == ResizeMethod.CYLIN_FRAC_LEARNED:
         return FractionalResizeLayer(in_channels=dim, 
                                     kernel_size=(3,4,4),
@@ -952,7 +967,7 @@ class CondAE(nn.Module):
                         block_klass(dim_out, dim_out, cond_emb_dim=cond_dim),
                         Downsample(
                             dim_out,
-                            cylindrical,
+                            resize_method=self.resize_method,
                             compress_Z=compress_Z,
                             compress=self.compress,
                         )
@@ -994,7 +1009,7 @@ class CondAE(nn.Module):
                         Upsample(
                             dim_in,
                             extra_upsample,
-                            cylindrical,
+                            self.resize_method,
                             compress_Z=compress_Z,
                             compress=self.compress,
                         )
@@ -1051,7 +1066,7 @@ class CondAE(nn.Module):
 
         # Bottleneck
         x = self.mid_block1(x, conditions)
-        # print(f"Bottleneck 1: {x.shape}", flush=True)
+        print(f"Bottleneck 1: {x.shape}", flush=True)
         if self.mid_attn:
             x = self.mid_attn(x)
             # print(f"Bottleneck Attention: {x.shape}", flush=True)
