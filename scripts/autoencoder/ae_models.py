@@ -151,26 +151,26 @@ class FractionalResizeLayer(nn.Module):
             padding=padding 
         )
 
-        def forward(self, x):
-            input_shape = x.shape
-            expected_bigger_shape = torch.Size([input_shape[0], 
-                                     input_shape[1], 
-                                     input_shape[2]*numerator, 
-                                     input_shape[3]*numerator, 
-                                     input_shape[4]*numerator])
-            x = self.cylinConvTrans(x)
-            assert x.shape == expected_bigger_shape , (x.shape, expected_bigger_shape)
-            x = self.cylinConv(x)
-            input2_shape = x.shape
-            expected_smaller_shape = torch.Size([input2_shape[0], 
-                                input2_shape[1], 
-                                input2_shape[2]//denominator, 
-                                input2_shape[3]//denominator, 
-                                input2_shape[4]//denominator])
-            assert x.shape == expected_smaller_shape, (x.shape, expected_smaller_shape)
+    def forward(self, x):
+        input_shape = x.shape
+        expected_bigger_shape = torch.Size([input_shape[0], 
+                                    input_shape[1], 
+                                    input_shape[2]*numerator, 
+                                    input_shape[3]*numerator, 
+                                    input_shape[4]*numerator])
+        x = self.cylinConvTrans(x)
+        assert x.shape == expected_bigger_shape , (x.shape, expected_bigger_shape)
+        x = self.cylinConv(x)
+        input2_shape = x.shape
+        expected_smaller_shape = torch.Size([input2_shape[0], 
+                            input2_shape[1], 
+                            input2_shape[2]//denominator, 
+                            input2_shape[3]//denominator, 
+                            input2_shape[4]//denominator])
+        assert x.shape == expected_smaller_shape, (x.shape, expected_smaller_shape)
 
-            return x
-        
+        return x
+    
 
 class FractionalResizeTrilinear(nn.Module):
     """
