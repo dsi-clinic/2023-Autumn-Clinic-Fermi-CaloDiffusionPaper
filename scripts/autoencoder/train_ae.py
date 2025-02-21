@@ -117,6 +117,31 @@ if __name__ == "__main__":
         default=None,
         help="Manually assign a maximum number of epochs",
     )
+    parser.add_argument(
+        "--vae_zdim",
+        type=int,
+        default=32,
+        help="Latent dimension for VAE if model is 'VAE'",
+    )
+    parser.add_argument(
+        "--beta",
+        type=float,
+        default=1.0,
+        help="Weight for KL divergence term in VAE loss",
+    )
+    parser.add_argument(
+        "--kl_warmup_steps",
+        type=int,
+        default=1000,
+        help="Number of steps for KL warmup",
+    )
+    parser.add_argument(
+        "--loss_type",
+        type=str,
+        default="mse",
+        choices=["mse", "l1", "huber"],
+        help="Type of reconstruction loss to use",
+    )
     flags = parser.parse_args()
 
     cwd = __file__
@@ -230,9 +255,15 @@ if __name__ == "__main__":
         learning_rate = float(dataset_config["LR"])
     else:
         learning_rate = float(flags.learning_rate[0])
-    checkpoint_folder = "../ae_models/{}_{}_{}_{}/".format(
-        dataset_config["CHECKPOINT_NAME"], flags.model, "_".join(map(str, flags.layer_sizes)), learning_rate
-    )
+    if flags.layer_sizes is None:
+        checkpoint_folder = "../ae_models/{}_{}_default_{}".format(
+            dataset_config["CHECKPOINT_NAME"], flags.model, learning_rate
+        )
+    else:
+        layer_sizes_str = "_".join(map(str, flags.layer_sizes))
+        checkpoint_folder = "../ae_models/{}_{}_{}_{}".format(
+            dataset_config["CHECKPOINT_NAME"], flags.model, layer_sizes_str, learning_rate
+        )
     if (
         flags.save_folder_absolute is not None
     ):  # Optionally replace this folder with whatever
@@ -283,19 +314,40 @@ if __name__ == "__main__":
             model.load_state_dict(checkpoint["model_state_dict"])
         elif len(checkpoint.keys()) > 1:
             model.load_state_dict(checkpoint)
+    elif flags.model == "VAE":
+        shape = (
+            dataset_config["SHAPE_PAD"][1:]
+            if (not orig_shape)
+            else dataset_config["SHAPE_ORIG"][1:]
+        )
+        print("Shape being passed to CaloVAE:", shape)
+        from ae_models import CaloVAE
+        model = CaloVAE(
+            shape=shape,
+            config=dataset_config,
+            training_obj=training_obj,
+            NN_embed=NN_embed,
+            nsteps=dataset_config["NSTEPS"],
+            zdim=flags.vae_zdim,
+            layer_sizes=flags.layer_sizes,
+            beta=flags.beta,
+            kl_warmup_steps=flags.kl_warmup_steps,
+        ).to(device=device)
     else:
         print("Model %s not supported!" % flags.model)
         exit(1)
 
     os.system(
-        "cp ae_models.py {}".format(checkpoint_folder)
+        "cp autoencoder/ae_models.py {}".format(checkpoint_folder)
     )  # bkp of model def
     os.system(
         "cp {} {}".format(flags.config, checkpoint_folder)
     )  # bkp of config file
 
     early_stopper = EarlyStopper(
-        patience=flags.patience, mode="diff", min_delta=flags.min_delta
+        patience=flags.patience,
+        mode="min",
+        min_delta=flags.min_delta
     )
     if "early_stop_dict" in checkpoint.keys() and not flags.reset_training:
         early_stopper.__dict__ = checkpoint["early_stop_dict"]
@@ -349,7 +401,7 @@ if __name__ == "__main__":
                 data,
                 E,
                 t=t,
-                loss_type="mse",
+                loss_type=flags.loss_type,
                 energy_loss_scale=energy_loss_scale,
             )
             batch_loss.backward()
@@ -363,76 +415,80 @@ if __name__ == "__main__":
         training_losses = np.append(training_losses, train_loss)
         print("loss: " + str(train_loss))
 
-        val_loss = 0
-        model.eval()
-        for i, (vE, vdata) in tqdm(
-            enumerate(loader_val, 0), unit="batch", total=len(loader_val)
-        ):
-            vdata = vdata.to(device=device)
-            vE = vE.to(device=device)
+        if loader_val is not None:
+            val_loss = 0
+            model.eval()
+            for i, (vE, vdata) in tqdm(
+                enumerate(loader_val, 0), unit="batch", total=len(loader_val)
+            ):
+                vdata = vdata.to(device=device)
+                vE = vE.to(device=device)
 
-            t = torch.randint(
-                0, model.nsteps, (vdata.size()[0],), device=device
-            ).long()
+                t = torch.randint(
+                    0, model.nsteps, (vdata.size()[0],), device=device
+                ).long()
 
-            batch_loss = model.compute_loss(
-                vdata,
-                vE,
-                t=t,
-                loss_type="mse",
-                energy_loss_scale=energy_loss_scale,
-            )
+                batch_loss = model.compute_loss(
+                    vdata,
+                    vE,
+                    t=t,
+                    loss_type=flags.loss_type,
+                    energy_loss_scale=energy_loss_scale,
+                )
 
-            val_loss += batch_loss.item()
-            del vdata, vE, batch_loss
+                val_loss += batch_loss.item()
+                del vdata, vE, batch_loss
 
-        val_loss = val_loss / len(loader_val)
-        val_losses = np.append(val_losses, val_loss)
-        print("val_loss: " + str(val_loss), flush=True)
+            val_loss = val_loss / len(loader_val)
+            val_losses = np.append(val_losses, val_loss)
+            print("val_loss: " + str(val_loss), flush=True)
 
-        scheduler.step(torch.tensor([train_loss]))
+            scheduler.step(torch.tensor([train_loss]))
 
-        if val_loss < min_validation_loss:
+            if val_loss < min_validation_loss:
+                torch.save(
+                    model.state_dict(),
+                    os.path.join(checkpoint_folder, "best_val.pth"),
+                )
+                min_validation_loss = val_loss
+
+            if (
+                not flags.no_early_stop
+            ):  # Only use early stopper if it has not been turned off by the flag
+                if early_stopper.early_stop(val_loss):
+                    print("Early stopping!")
+                    break
+
+            model.eval()
+            print("SAVING")
+
+            # Save full training state so can be resumed
             torch.save(
-                model.state_dict(),
-                os.path.join(checkpoint_folder, "best_val.pth"),
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict(),
+                    "train_loss_hist": training_losses,
+                    "val_loss_hist": val_losses,
+                    "early_stop_dict": early_stopper.__dict__,
+                },
+                checkpoint_path,
             )
-            min_validation_loss = val_loss
 
-        if (
-            not flags.no_early_stop
-        ):  # Only use early stopper if it has not been turned off by the flag
-            if early_stopper.early_stop(val_loss - train_loss):
-                print("Early stopping!")
-                break
-
-        model.eval()
-        print("SAVING")
-
-        # Save full training state so can be resumed
-        torch.save(
-            {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict(),
-                "train_loss_hist": training_losses,
-                "val_loss_hist": val_losses,
-                "early_stop_dict": early_stopper.__dict__,
-            },
-            checkpoint_path,
-        )
-
-        with open(checkpoint_folder + "/training_losses.txt", "w") as tfileout:
-            tfileout.write(
-                "\n".join("{}".format(tl) for tl in training_losses) + "\n"
-            )
-        with open(
-            checkpoint_folder + "/validation_losses.txt", "w"
-        ) as vfileout:
-            vfileout.write(
-                "\n".join("{}".format(vl) for vl in val_losses) + "\n"
-            )
+            with open(checkpoint_folder + "/training_losses.txt", "w") as tfileout:
+                tfileout.write(
+                    "\n".join("{}".format(tl) for tl in training_losses) + "\n"
+                )
+            with open(
+                checkpoint_folder + "/validation_losses.txt", "w"
+            ) as vfileout:
+                vfileout.write(
+                    "\n".join("{}".format(vl) for vl in val_losses) + "\n"
+                )
+        else:
+            val_loss = train_loss
+            print("(No validation set)")
 
     print("Saving to %s" % checkpoint_folder, flush=True)
     torch.save(model.state_dict(), os.path.join(checkpoint_folder, "final.pth"))
