@@ -639,6 +639,7 @@ class CondAE(nn.Module):
     - cond_embed (bool): whether to embed energy
     - resnet_set (list): alternate method to control downsampling, allows removal of resnet + downsample block combinations from UNet architecture
     - compress (int): compression factor when dividing dimensions size, default 2
+    - kl_warmup_steps (int): number of steps to warm up the KL term
     """
 
     def __init__(
@@ -659,9 +660,13 @@ class CondAE(nn.Module):
         cond_embed=True,
         resnet_set=[0, 1, 2],
         compress=2,
+        beta=1.0,
+        kl_warmup_steps=1000,
     ):
         super().__init__()
-
+        self.beta = beta  # Weight for KL term
+        self.kl_warmup_steps = kl_warmup_steps
+        self.current_step = 0
         # Determine dimensions
         self.channels = channels
         self.block_attn = block_attn
@@ -868,10 +873,10 @@ class CondAE(nn.Module):
         - torch.Tensor: Reconstructed data tensor
         """
         # Generate energy embeddings
-        # print(f"Start: {x.shape}", flush=True)
+        print(f"Start: {x.shape}", flush=True)
         conditions = self.cond_mlp(cond)
         x = self.init_conv(x)  # Convolution
-        # print(f"Initial Conv: {x.shape}", flush=True)
+        print(f"Initial Conv: {x.shape}", flush=True)
 
         # Downsample
         for i, (block1, block2, downsample) in enumerate(self.downs):
@@ -880,16 +885,16 @@ class CondAE(nn.Module):
             if self.block_attn:
                 x = self.downs_attn[i](x)
             x = downsample(x)
-            # print(f"Downsample {i + 1}: {x.shape}", flush=True)
+            print(f"Downsample {i + 1}: {x.shape}", flush=True)
 
         # Bottleneck
         x = self.mid_block1(x, conditions)
-        # print(f"Bottleneck 1: {x.shape}", flush=True)
+        print(f"Bottleneck 1: {x.shape}", flush=True)
         if self.mid_attn:
             x = self.mid_attn(x)
-            # print(f"Bottleneck Attention: {x.shape}", flush=True)
+            print(f"Bottleneck Attention: {x.shape}", flush=True)
         x = self.mid_block2(x, conditions)
-        # print(f"Bottleneck 2: {x.shape}", flush=True)
+        print(f"Bottleneck 2: {x.shape}", flush=True)
 
         # Upsample
         for i, (block1, block2, upsample) in enumerate(self.ups):
@@ -898,10 +903,10 @@ class CondAE(nn.Module):
             if self.block_attn:
                 x = self.ups_attn[i](x)
             x = upsample(x)
-            # print(f"Upsample {i + 1}: {x.shape}", flush=True)
+            print(f"Upsample {i + 1}: {x.shape}", flush=True)
 
         x = self.final_conv(x)
-        # print(f"Final Conv: {x.shape}", flush=True)
+        print(f"Final Conv: {x.shape}", flush=True)
         return x
 
     def encode(self, x, cond):
@@ -963,3 +968,249 @@ class CondAE(nn.Module):
             x = upsample(x)
 
         return self.final_conv(x)  # final convolution to reconstruct data
+
+    def compute_loss(self, data, E, t=None, loss_type="mse", energy_loss_scale=0.0):
+        """
+        Compute standard VAE loss = ReconLoss + KL. Condition on E if desired.
+        """
+        mu, logvar = self.encode(data, E)
+        z = self.reparameterize(mu, logvar)
+        x_recon = self.decode(z, E)
+
+        # Reconstruction term
+        if loss_type == "mse":
+            recon_loss = nn.functional.mse_loss(x_recon, data)
+        elif loss_type == "l1":
+            recon_loss = nn.functional.l1_loss(x_recon, data)
+        elif loss_type == "huber":
+            recon_loss = nn.functional.smooth_l1_loss(x_recon, data)
+        else:
+            raise NotImplementedError("Only MSE, L1, and Huber loss types are supported")
+
+        # KL divergence term
+        kl = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+        kl_weight = min(self.current_step / self.kl_warmup_steps, 1.0)
+        self.current_step += 1
+        kl = kl_weight * self.beta * torch.mean(kl)
+
+        loss = recon_loss + kl
+
+        # Optionally add an energy-matching term, if "energy" in training_obj
+        if "energy" in self.training_obj:
+            dims = [i for i in range(1, len(data.shape))]
+            tot_energy_pred = torch.sum(x_recon, dim=dims)
+            tot_energy_data = torch.sum(data, dim=dims)
+            loss_en = (
+                energy_loss_scale
+                * nn.functional.mse_loss(tot_energy_data, tot_energy_pred)
+            )
+            loss += loss_en
+
+        return loss
+
+    def reparameterize(self, mu, logvar):
+        """
+        Reparameterization trick to sample from N(mu, var) from N(0,1).
+        :param mu: (Tensor) Mean of the latent Gaussian [B x D]
+        :param logvar: (Tensor) Standard deviation of the latent Gaussian [B x D]
+        :return: (Tensor) [B x D]
+        """
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def sample(self, num_samples, E):
+        """
+        Sample new data points from the VAE.
+        Args:
+            num_samples: Number of samples to generate
+            E: Energy conditions for the samples
+        """
+        device = next(self.parameters()).device
+        z = torch.randn(num_samples, self.zdim).to(device)
+        samples = self.decode(z, E)
+        return samples
+
+class CaloVAE(nn.Module):
+    """
+    Conditional Variational AutoEncoder (VAE) that parallels CaloEnco,
+    but encodes into latent distribution (mu, logvar) instead of a single embedding.
+    """
+
+    def __init__(
+        self,
+        shape,
+        config=None,
+        training_obj="mean_pred",
+        nsteps=400,
+        NN_embed=None,
+        zdim=32,
+        layer_sizes=None,
+        beta=1.0,
+        kl_warmup_steps=1000,
+        **kwargs
+    ):
+        """
+        Args:
+            shape (tuple): Input shape minus the batch dimension, e.g. (1, 45, 16, 9)
+            config (dict): Config for data, etc.
+            training_obj (str): Usually 'mean_pred'
+            nsteps (int): For consistency with your current approach, though VAE won't use time steps directly
+            NN_embed: If you want to embed E with a custom network
+            zdim (int): Latent dimension
+            layer_sizes (list): Channel sizes for down/up sampling
+        """
+        super().__init__()
+        self.shape = shape
+        self.zdim = zdim
+        self.training_obj = training_obj
+        self.NN_embed = NN_embed
+        self.nsteps = nsteps
+        self.beta = beta  # Weight for KL term
+        self.kl_warmup_steps = kl_warmup_steps
+        self.current_step = 0
+
+        # Use the same conditional embedding approach as CaloEnco for energy
+        cond_dim = 128
+        self.cond_mlp = nn.Sequential(
+            nn.Linear(1, cond_dim),
+            nn.GELU(),
+            nn.Linear(cond_dim, cond_dim),
+            nn.GELU(),
+        )
+
+        hidden = layer_sizes[0] if layer_sizes else 64
+
+        # Reshape the input if it's 1D
+        if len(shape) == 1:
+            # For 1D input, use fully connected layers
+            self.is_1d = True
+            self.encoder = nn.Sequential(
+                nn.Linear(shape[0], hidden),
+                nn.LayerNorm(hidden),
+                nn.ReLU(),
+                nn.Linear(hidden, hidden),
+                nn.LayerNorm(hidden),
+                nn.ReLU(),
+            )
+            self.fc_mu = nn.Linear(hidden, zdim)
+            self.fc_logvar = nn.Linear(hidden, zdim)
+            
+            # Decoder - first layer accepts 'zdim', outputs 'hidden', etc.
+            self.decoder = nn.Sequential(
+                nn.Linear(zdim, hidden),
+                nn.ReLU(),
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Linear(hidden, shape[0]),
+                nn.Sigmoid(),
+            )
+        else:
+            # For 3D input, reshape to [1, depth, height, width]
+            self.is_1d = False
+            # Reshape to [1, depth, height, width] if needed
+            if len(shape) == 3:
+                self.shape = (1,) + tuple(shape)
+            elif len(shape) == 4:
+                self.shape = tuple(shape)
+            else:
+                raise ValueError(f"Unexpected shape: {shape}. Expected 1D, 3D or 4D shape.")
+
+            in_ch = self.shape[0]
+            self.enc_conv = nn.Conv3d(in_ch, hidden, kernel_size=3, stride=2, padding=1)
+            
+            # Calculate flattened size
+            flattened_size = hidden * (self.shape[1]//2) * (self.shape[2]//2) * (self.shape[3]//2)
+            
+            self.fc_mu = nn.Linear(flattened_size, zdim)
+            self.fc_logvar = nn.Linear(flattened_size, zdim)
+            self.dec_fc = nn.Linear(zdim, flattened_size)
+            self.dec_conv = nn.ConvTranspose3d(hidden, in_ch, kernel_size=3, stride=2, padding=1, output_padding=1)
+
+    def encode(self, x, E):
+        """Encode input to latent space"""
+        cond = self.cond_mlp(E.unsqueeze(1).float())
+
+        if self.is_1d:
+            h = self.encoder(x)
+        else:
+            h = self.enc_conv(x)
+            h = torch.relu(h)
+            h = h.view(h.size(0), -1)
+
+        mu = self.fc_mu(h)
+        logvar = self.fc_logvar(h)
+        return mu, logvar
+
+    def decode(self, z, E):
+        if self.is_1d:
+            return self.decoder(z)
+        else:
+            h = self.dec_fc(z)
+            h = torch.relu(h)
+            B = h.size(0)
+            hidden = self.dec_fc.out_features // (self.shape[1]//2 * self.shape[2]//2 * self.shape[3]//2)
+            h = h.view(B, hidden, self.shape[1]//2, self.shape[2]//2, self.shape[3]//2)
+            return self.dec_conv(h)
+
+    def compute_loss(self, data, E, t=None, loss_type="mse", energy_loss_scale=0.0):
+        """
+        Compute standard VAE loss = ReconLoss + KL. Condition on E if desired.
+        """
+        mu, logvar = self.encode(data, E)
+        z = self.reparameterize(mu, logvar)
+        x_recon = self.decode(z, E)
+
+        # Reconstruction term
+        if loss_type == "mse":
+            recon_loss = nn.functional.mse_loss(x_recon, data)
+        elif loss_type == "l1":
+            recon_loss = nn.functional.l1_loss(x_recon, data)
+        elif loss_type == "huber":
+            recon_loss = nn.functional.smooth_l1_loss(x_recon, data)
+        else:
+            raise NotImplementedError("Only MSE, L1, and Huber loss types are supported")
+
+        # KL divergence term
+        kl = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+        kl_weight = min(self.current_step / self.kl_warmup_steps, 1.0)
+        self.current_step += 1
+        kl = kl_weight * self.beta * torch.mean(kl)
+
+        loss = recon_loss + kl
+
+        # Optionally add an energy-matching term, if "energy" in training_obj
+        if "energy" in self.training_obj:
+            dims = [i for i in range(1, len(data.shape))]
+            tot_energy_pred = torch.sum(x_recon, dim=dims)
+            tot_energy_data = torch.sum(data, dim=dims)
+            loss_en = (
+                energy_loss_scale
+                * nn.functional.mse_loss(tot_energy_data, tot_energy_pred)
+            )
+            loss += loss_en
+
+        return loss
+
+    def reparameterize(self, mu, logvar):
+        """
+        Reparameterization trick to sample from N(mu, var) from N(0,1).
+        :param mu: (Tensor) Mean of the latent Gaussian [B x D]
+        :param logvar: (Tensor) Standard deviation of the latent Gaussian [B x D]
+        :return: (Tensor) [B x D]
+        """
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def sample(self, num_samples, E):
+        """
+        Sample new data points from the VAE.
+        Args:
+            num_samples: Number of samples to generate
+            E: Energy conditions for the samples
+        """
+        device = next(self.parameters()).device
+        z = torch.randn(num_samples, self.zdim).to(device)
+        samples = self.decode(z, E)
+        return samples
