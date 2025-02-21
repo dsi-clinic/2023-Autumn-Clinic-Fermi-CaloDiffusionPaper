@@ -10,3 +10,12 @@ To keep track of each result, we need the following:
 | Result Name | Script or Notebook | Hard-coded paths | 
 | --- | --- | --- |
 | TODO | TODO | TODO |
+
+
+## Make GIF
+
+To make a GIF, run the `make_gif.sh` script. This will take all the PDFs in the output from running the plot.py script and convert them to a GIF. This allows us to share a single GIF that shows the results through the layers instead of having to share all the PDFs. You need to edit the `make_gif.sh` script to point to the correct directory where the PDFs are located and adjust the file name to match the pdf file names.
+
+```bash
+./make_gif.sh
+```
