@@ -262,14 +262,14 @@ class FractionalResizeTrilinear(nn.Module):
             FractionalResizeTrilinear._is_first = False
 
         # If we're back to starting shape, no need to interpolate
-        if spatial_dims == FractionalResizeTrilinear._start_shape:
+        if spatial_dims == FractionalResizeTrilinear._start_shape and not FractionalResizeTrilinear._is_first:
             return x
 
         desired_shape = FractionalResizeTrilinear._all_output_shapes[FractionalResizeTrilinear._current_step]
         FractionalResizeTrilinear._current_step += 1 
 
         x = F.interpolate(x, size=desired_shape)
-        
+
         return x
 
     @classmethod
