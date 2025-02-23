@@ -201,7 +201,8 @@ class FractionalResizeTrilinear(nn.Module):
             start_shape (tuple): The initial spatial dimensions of the input tensor.
 
         Returns:
-            list of tuple: The list of target shapes for each interpolation step (downsampling then upsampling).
+            list of tuple: The list of starting shape and target shapes for each interpolation step 
+            (downsampling then upsampling).
         """
         shapes = [start_shape]
         current_shape = start_shape
@@ -220,9 +221,8 @@ class FractionalResizeTrilinear(nn.Module):
         
         # Add upsampling shapes (reverse path excluding the smallest shape)
         shapes.extend(shapes[-2::-1])
-        shapes_to_sample_to = shapes[1:]
-
-        return shapes_to_sample_to
+        print("SHAPES ARE", shapes)
+        return shapes
 
     def __init__(self, numerator=2, denominator=3, num_samples=-1):
         """
@@ -254,19 +254,29 @@ class FractionalResizeTrilinear(nn.Module):
         Returns:
             torch.Tensor: The resized tensor.
         """
+        FractionalResizeTrilinear._current_step += 1
+
         spatial_dims = tuple(x.shape[-3:])
 
+        # Only executed the first forward pass
         if FractionalResizeTrilinear._is_first:
             FractionalResizeTrilinear._start_shape = spatial_dims
             FractionalResizeTrilinear._all_output_shapes = self._calculate_all_shapes(spatial_dims)
             FractionalResizeTrilinear._is_first = False
 
-        # If we're back to starting shape, no need to interpolate
-        if spatial_dims == FractionalResizeTrilinear._start_shape and not FractionalResizeTrilinear._is_first:
-            return x
+        # Increment step counter based on the number of times it's called
+        if FractionalResizeTrilinear._current_step == len(FractionalResizeTrilinear._all_output_shapes) - 1:
+            # Reset current step counter back to 0 if all the downsampling/upsampling steps are done
+            FractionalResizeTrilinear._current_step = 0
+        
+        print("counter for step is:", FractionalResizeTrilinear._current_step)
 
-        desired_shape = FractionalResizeTrilinear._all_output_shapes[FractionalResizeTrilinear._current_step]
-        FractionalResizeTrilinear._current_step += 1 
+        try:
+            desired_shape = FractionalResizeTrilinear._all_output_shapes[FractionalResizeTrilinear._current_step]
+        except:
+            return x
+        
+        print("Will interpolate to: ", desired_shape)
 
         x = F.interpolate(x, size=desired_shape)
 
@@ -275,6 +285,7 @@ class FractionalResizeTrilinear(nn.Module):
     @classmethod
     def reset_step(cls):
         """Reset the step counter to 0"""
+        print("Reset step!")
         cls._current_step = 0
         
 class ResizeMethod(Enum):
