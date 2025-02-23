@@ -93,16 +93,13 @@ class CylindricalConvTrans(nn.Module):
 
         Pads the phi_bin dimension circularly before applying convolution.
         """
-        print("CylindricalConvTrans forward x shape: ", x.shape)
         # Circular padding for the phi_bin dimension
         # Out size is : O = (i-1)*S + K - 2P
         # To achieve 'same' use padding P = ((S-1)*W-S+F)/2, with F = filter size, S = stride, W = input size
         # Pad last dim with nothing, 2nd to last dim is circular one
         circ_pad = self.padding_orig[1]
         x = F.pad(x, pad=(0, 0, circ_pad, circ_pad, 0, 0), mode="circular")
-        print("F.pad called w/", (0,0,circ_pad, circ_pad, 0, 0), "new shape: ", x.shape)
         x = self.convTrans(x)
-        print("shape after calling convTrans w/ padding", self.padding_orig, ":", x.shape)
         return x
 
 
@@ -131,8 +128,6 @@ class FractionalResizeLayer(nn.Module):
         super().__init__()
         self.numerator = numerator
         self.denominator = denominator
-
-        print(self.numerator, self.denominator)
 
         self.cylinConvTrans = CylindricalConvTrans(
             in_channels,    
@@ -172,48 +167,65 @@ class FractionalResizeLayer(nn.Module):
         return x
     
 
+        
 class FractionalResizeTrilinear(nn.Module):
-    """
-    Resizes an input tensor using nn.interpolate's trilinear mode. Supports 
-    
-    resizing by a fractional amount. The output size's spatial dimensions 
-    is the fraction times the input size. 
+    _start_shape = None
+    _all_output_shapes = None
+    _is_first = True
+    _current_step = 0
 
-    Assumes input tensor format: (batch_size, channels, z_bin, phi_bin, r_bin)
+    def _calculate_all_shapes(self, start_shape):
+        """Calculate sequence of shapes for downsampling and upsampling"""
+        shapes = [start_shape]
+        current_shape = start_shape
+        scale = self.numerator / self.denominator
+        
+        # Calculate downsampling shapes
+        for _ in range(self.num_samples): 
+            if any(x <= 2 for x in current_shape):
+                # Prevent compresing to super small sizes
+                break
 
-    Upsampling Example: 256x256x256 image by 3/2  -> 384x384x384
-    N x C x 256 x 256 x 256 -(numerator=3, denominator=2)> N x C x 384 x 384 x 384 
+            next_shape = tuple(int(x * scale) for x in current_shape)
+                
+            shapes.append(next_shape)
+            current_shape = next_shape
+        
+        # Add upsampling shapes (reverse path excluding the smallest shape)
+        shapes.extend(shapes[-2::-1])
+        shapes_to_sample_to = shapes[1:]
 
-    Downsampling Example: 384x384x384 image by 2/3  -> 256x256x256
-    N x C x 384 x 384 x 384 -(numerator=2, denominator=3)> N x C x 256 x 256 x 256
-    """
-    def __init__(self,
-        numerator=3, 
-        denominator=2):
+        return shapes_to_sample_to
 
+    def __init__(self, numerator=2, denominator=3, num_samples=-1):
         super().__init__()
         self.numerator = numerator
         self.denominator = denominator
+        self.num_samples = num_samples
 
     def forward(self, x):
-        input_shape = x.shape
-        divisor = max(self.numerator, self.denominator)
-        # Calculate padding needed for each dimension
-        pad_z = (divisor - (input_shape[2] % divisor)) % divisor
-        pad_phi = (divisor - (input_shape[3] % divisor)) % divisor
-        pad_r = (divisor - (input_shape[4] % divisor)) % divisor
-        print("Input shape: ", x.shape)
-        x = F.pad(x, (0, pad_z, 0, pad_phi, 0, pad_r), mode='circular')
-        print("Shape after circular padding: ", x.shape)
-        x = F.interpolate(x, scale_factor=self.numerator/self.denominator)
-        print("Shape after interpolate: ", x.shape)
-        # spatial_dimensions = torch.tensor(input_shape[2:], dtype=torch.float)
-        # float_dims =  (self.numerator/self.denominator) * spatial_dimensions
-        # poss_err_msg = "the fraction * input spatial dimension should be a whole number"
-        # assert torch.allclose(float_dims.to(torch.int), float_dims), poss_err_msg
-        
+        spatial_dims = tuple(x.shape[-3:])
+
+        if FractionalResizeTrilinear._is_first:
+            FractionalResizeTrilinear._start_shape = spatial_dims
+            FractionalResizeTrilinear._all_output_shapes = self._calculate_all_shapes(spatial_dims)
+            FractionalResizeTrilinear._is_first = False
+
+        # If we're back to starting shape, no need to interpolate
+        if spatial_dims == FractionalResizeTrilinear._start_shape:
+            return x
+
+        desired_shape = FractionalResizeTrilinear._all_output_shapes[FractionalResizeTrilinear._current_step]
+        FractionalResizeTrilinear._current_step += 1 
+
+        x = F.interpolate(x, size=desired_shape)
         return x
 
+    @classmethod
+    def reset_step(cls):
+        """Reset the step counter to 0"""
+        cls._current_step = 0
+        
 class ResizeMethod(Enum):
     """
     Enum for different tensor resizing methods. CYLIN_FRAC_LEARNED and 
@@ -283,12 +295,9 @@ class CylindricalConv(nn.Module):
         # Circular padding for the phi_bin dimension
         # To achieve 'same' use padding P = ((S-1)*W-S+F)/2, with F = filter size, S = stride, W = input size
         # Pad last dim with nothing, 2nd to last dim is circular one
-        print("CylindricalConv forward x shape: ", x.shape)
         circ_pad = self.padding_orig[1]
         x = F.pad(x, pad=(0, 0, circ_pad, circ_pad, 0, 0), mode="circular")
-        print("F.pad circular mode called with", (0,0,circ_pad, circ_pad, 0, 0), "now: ", x.shape)
         x = self.conv(x)
-        print("shape after calling conv w/ padding", self.padding_orig, ":", x.shape)
         return x
 
 
@@ -595,7 +604,7 @@ class PreNorm(nn.Module):
 
 def Upsample(
     dim, extra_upsample=[0, 0, 0], resize_method=ResizeMethod.CYLIN_INT_CONV,
-    compress_Z=False, compress=2
+    compress_Z=False, compress=2, num_of_samples=-1
 ):
     """
     Upsampling layer in 2 dimensions while optionally compressing the Z dimension.
@@ -606,6 +615,7 @@ def Upsample(
     - resize_method (enum): which conv/interpolate method to use for upsampling.
     - compress_Z (bool): Whether to adjust Z-dimension upsampling.
     - compress (float): compression factor
+    - num_of_samples (int): Number of upsampling steps to take
 
     Returns:
     - nn.Module: Upsampling layer.
@@ -646,11 +656,12 @@ def Upsample(
                                     )
     
     return FractionalResizeTrilinear(numerator=fraction.numerator, 
-                                        denominator=fraction.denominator)
+                                        denominator=fraction.denominator,
+                                        num_samples=num_of_samples)
 
 
 def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV, 
-               compress_Z=False, compress=2):
+               compress_Z=False, compress=2, num_of_samples=-1):
     """
     Downsampling layer in 2 dimensions while optionally compressing the Z dimension.
 
@@ -659,11 +670,12 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
     - resize_method (enum): which conv/interpolate method to use for downsampling.
     - compress_Z (bool): Whether to adjust Z-dimension downsampling.
     - compress (float): Compression factor
+    - num_of_samples(int): Number of downsampling steps to take in total.
 
     Returns:
     - nn.Module: Downsampling layer.
     """
-    print("resize method of:", resize_method, type(resize_method))
+    print("Downsampling will resize using:", resize_method)
     Z_stride = compress if compress_Z else 1
     if resize_method == ResizeMethod.SIMPLE_INT_CONV: 
         return nn.Conv3d(
@@ -695,7 +707,8 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
                                     )
     # we swap numerator and denom. to downsample. 1.5 as compress -> num.=2, denom.=3
     return FractionalResizeTrilinear(numerator=fraction.denominator, 
-                                        denominator=fraction.numerator)
+                                        denominator=fraction.numerator,
+                                        num_samples=num_of_samples)
     
     # Alternative using average pooling
     # return nn.AvgPool3d(kernel_size=(1,2,2), stride=(1,2,2), padding=0)
@@ -853,7 +866,6 @@ class CondAE(nn.Module):
 
         in_out = list(zip(layer_sizes[:-1], layer_sizes[1:]))
 
-
         self.resize_method = ResizeMethod(resize_method)
 
         # Initial convolution as Conv3d or CylindricalConv
@@ -970,6 +982,7 @@ class CondAE(nn.Module):
                             resize_method=self.resize_method,
                             compress_Z=compress_Z,
                             compress=self.compress,
+                            num_of_samples = len(in_out)
                         )
                         if not is_last
                         else nn.Identity(),
@@ -1012,6 +1025,7 @@ class CondAE(nn.Module):
                             self.resize_method,
                             compress_Z=compress_Z,
                             compress=self.compress,
+                            num_of_samples = len(in_out)
                         )
                         if not is_last
                         else nn.Identity(),
