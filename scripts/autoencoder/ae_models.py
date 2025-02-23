@@ -269,24 +269,17 @@ class FractionalResizeTrilinear(nn.Module):
             # Reset current step counter back to 0 if all the downsampling/upsampling steps are done
             FractionalResizeTrilinear._current_step = 0
         
-        print("counter for step is:", FractionalResizeTrilinear._current_step)
 
         try:
             desired_shape = FractionalResizeTrilinear._all_output_shapes[FractionalResizeTrilinear._current_step]
         except:
             return x
         
-        print("Will interpolate to: ", desired_shape)
 
         x = F.interpolate(x, size=desired_shape)
 
         return x
-
-    @classmethod
-    def reset_step(cls):
-        """Reset the step counter to 0"""
-        print("Reset step!")
-        cls._current_step = 0
+    
         
 class ResizeMethod(Enum):
     """
