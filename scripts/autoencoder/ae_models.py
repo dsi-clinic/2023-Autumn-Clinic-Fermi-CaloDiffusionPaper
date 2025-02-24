@@ -222,7 +222,7 @@ class FractionalResizeTrilinear(nn.Module):
         
         # Add upsampling shapes (reverse path excluding the smallest shape)
         shapes.extend(shapes[-2::-1])
-        print("SHAPES ARE", shapes)
+        print("Data dimensions will be: ", shapes)
         return shapes
 
     def __init__(self, numerator=2, denominator=3, num_samples=-1):
@@ -256,8 +256,6 @@ class FractionalResizeTrilinear(nn.Module):
             torch.Tensor: The resized tensor.
         """
         FractionalResizeTrilinear._current_step += 1
-
-        print("Currrent step:", FractionalResizeTrilinear._current_step)
 
         spatial_dims = tuple(x.shape[-3:])
 
@@ -733,7 +731,6 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
     Returns:
     - nn.Module: Downsampling layer.
     """
-    print("Downsampling will resize using:", resize_method)
     Z_stride = compress if compress_Z else 1
     if resize_method == ResizeMethod.SIMPLE_INT_CONV: 
         return nn.Conv3d(
@@ -764,7 +761,6 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
                                     denominator=fraction.denominator
                                     )
     # we swap numerator and denom. to downsample. 1.5 as compress -> num.=2, denom.=3
-    print("Number of samples:", num_of_samples)
     return FractionalResizeTrilinear(numerator=fraction.denominator, 
                                         denominator=fraction.numerator,
                                         num_samples=num_of_samples)
@@ -1001,9 +997,7 @@ class CondAE(nn.Module):
         self.compress = compress  # compression factor for Z, H, W dimensions
         print(f"CaloEnco compress factor config: {self.compress}", flush=True)
         # Build the downsampling layers
-        print(in_out)
         for ind, (dim_in, dim_out) in enumerate(in_out):
-            print("Loop of downs is running, currently is: ", len(self.downs))
             is_last = ind >= (num_resolutions - 1)
             if not is_last:
                 # Added +1 for extra upsampling to match dimensionality for pytorch model
@@ -1126,29 +1120,28 @@ class CondAE(nn.Module):
         - torch.Tensor: Reconstructed data tensor
         """
         # Generate energy embeddings
-        print(f"Start: {x.shape}", flush=True)
+        # print(f"Start: {x.shape}", flush=True)
         conditions = self.cond_mlp(cond)
         x = self.init_conv(x)  # Convolution
-        print(f"Initial Conv: {x.shape}", flush=True)
+        # print(f"Initial Conv: {x.shape}", flush=True)
 
         # Downsample
-        print("LENGTH OF self.downs", len(self.downs), type(self.downs[0][2]), type(self.downs[1][2]), type(self.downs[2][2]))
         for i, (block1, block2, downsample) in enumerate(self.downs):
             x = block1(x, conditions)
             x = block2(x, conditions)
             if self.block_attn:
                 x = self.downs_attn[i](x)
             x = downsample(x)
-            print(f"Downsample {i + 1}: {x.shape}", flush=True)
+            # print(f"Downsample {i + 1}: {x.shape}", flush=True)
 
         # Bottleneck
         x = self.mid_block1(x, conditions)
-        print(f"Bottleneck 1: {x.shape}", flush=True)
+        # print(f"Bottleneck 1: {x.shape}", flush=True)
         if self.mid_attn:
             x = self.mid_attn(x)
             # print(f"Bottleneck Attention: {x.shape}", flush=True)
         x = self.mid_block2(x, conditions)
-        print(f"Bottleneck 2: {x.shape}", flush=True)
+        # print(f"Bottleneck 2: {x.shape}", flush=True)
 
         # Upsample
         for i, (block1, block2, upsample) in enumerate(self.ups):
@@ -1157,10 +1150,10 @@ class CondAE(nn.Module):
             if self.block_attn:
                 x = self.ups_attn[i](x)
             x = upsample(x)
-            print(f"Upsample {i + 1}: {x.shape}", flush=True)
+            # print(f"Upsample {i + 1}: {x.shape}", flush=True)
 
         x = self.final_conv(x)
-        print(f"Final Conv: {x.shape}", flush=True)
+        # print(f"Final Conv: {x.shape}", flush=True)
         return x
 
     def encode(self, x, cond):
