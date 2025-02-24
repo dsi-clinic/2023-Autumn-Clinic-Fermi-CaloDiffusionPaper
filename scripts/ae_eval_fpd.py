@@ -1,9 +1,9 @@
 """
-This module contains a refactored version of train_ae.py. To run this python
+This script contains a refactored version of train_ae.py. To run this python
 script to train an autoencoder, modify train_ae_4x64.sh or train_ae_4x32_ds3.sh 
 to use train_ae_class.py instead of train_ae.py. The model training loss, 
-validation losses, and the Frechet distance will be saved within 
-a sub-subfolder inside the ae_modelsfolder, which can be found 
+validation losses, and the Frechet physics distance will be saved within 
+a sub-subfolder inside the ae_models folder, which can be found 
 outside of the 2023-Autumn-Clinic...folder. 
 For testing purposes during development, set the the take_subset parameter 
 inside the main block to True when initializing the AutoencoderTrainer. 
