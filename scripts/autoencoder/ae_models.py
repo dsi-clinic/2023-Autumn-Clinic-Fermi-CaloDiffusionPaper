@@ -212,7 +212,8 @@ class FractionalResizeTrilinear(nn.Module):
         for _ in range(self.num_samples): 
             if any(x <= 2 for x in current_shape):
                 # Prevent compresing to super small sizes
-                break
+                shapes.append(current_shape)
+                continue
 
             next_shape = tuple(int(x * scale) for x in current_shape)
                 
@@ -255,6 +256,8 @@ class FractionalResizeTrilinear(nn.Module):
             torch.Tensor: The resized tensor.
         """
         FractionalResizeTrilinear._current_step += 1
+
+        print("Currrent step:", FractionalResizeTrilinear._current_step)
 
         spatial_dims = tuple(x.shape[-3:])
 
@@ -761,6 +764,7 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
                                     denominator=fraction.denominator
                                     )
     # we swap numerator and denom. to downsample. 1.5 as compress -> num.=2, denom.=3
+    print("Number of samples:", num_of_samples)
     return FractionalResizeTrilinear(numerator=fraction.denominator, 
                                         denominator=fraction.numerator,
                                         num_samples=num_of_samples)
@@ -997,7 +1001,9 @@ class CondAE(nn.Module):
         self.compress = compress  # compression factor for Z, H, W dimensions
         print(f"CaloEnco compress factor config: {self.compress}", flush=True)
         # Build the downsampling layers
+        print(in_out)
         for ind, (dim_in, dim_out) in enumerate(in_out):
+            print("Loop of downs is running, currently is: ", len(self.downs))
             is_last = ind >= (num_resolutions - 1)
             if not is_last:
                 # Added +1 for extra upsampling to match dimensionality for pytorch model
@@ -1126,6 +1132,7 @@ class CondAE(nn.Module):
         print(f"Initial Conv: {x.shape}", flush=True)
 
         # Downsample
+        print("LENGTH OF self.downs", len(self.downs), type(self.downs[0][2]), type(self.downs[1][2]), type(self.downs[2][2]))
         for i, (block1, block2, downsample) in enumerate(self.downs):
             x = block1(x, conditions)
             x = block2(x, conditions)
