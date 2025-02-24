@@ -258,7 +258,7 @@ class FractionalResizeTrilinear(nn.Module):
 
         spatial_dims = tuple(x.shape[-3:])
 
-        # Only executed the first forward pass
+        # Only executed the first forward pass 
         if FractionalResizeTrilinear._is_first:
             FractionalResizeTrilinear._start_shape = spatial_dims
             FractionalResizeTrilinear._all_output_shapes = self._calculate_all_shapes(spatial_dims)
@@ -1027,6 +1027,7 @@ class CondAE(nn.Module):
                 self.extra_upsamples.append(extra_upsample_dim)
 
             # Append downsampling blocks
+            no_identity_needed = self.resize_method == ResizeMethod.CYLIN_FRAC_INTERPOLATE
             self.downs.append(
                 nn.ModuleList(
                     [
@@ -1036,10 +1037,10 @@ class CondAE(nn.Module):
                             dim_out,
                             resize_method=self.resize_method,
                             compress_Z=compress_Z,
-                            compress=self.compress,
+                            compress=self.compress, 
                             num_of_samples = len(in_out)
                         )
-                        if not is_last
+                        if not is_last or no_identity_needed
                         else nn.Identity(),
                     ]
                 )
@@ -1082,7 +1083,7 @@ class CondAE(nn.Module):
                             compress=self.compress,
                             num_of_samples = len(in_out)
                         )
-                        if not is_last
+                        if not is_last or no_identity_needed
                         else nn.Identity(),
                     ]
                 )
