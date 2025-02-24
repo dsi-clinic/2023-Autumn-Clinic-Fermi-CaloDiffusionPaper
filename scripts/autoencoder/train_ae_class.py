@@ -243,7 +243,7 @@ class AutoencoderTrainer:
         """
         learning_rate = float(self.args.learning_rate[0] if \
                             self.args.learning_rate else self.config["LR"])
-        subset = "subset" if take_subset else "full_data"
+        subset = "subset" if take_subset else "full-data"
         random = "deterministic" if set_seed else "random"
         checkpoint_folder = f"../ae_models/{subset}-{random}/" \
                     f"{self.config['CHECKPOINT_NAME']}_{self.args.model}_" \
@@ -466,12 +466,8 @@ class AutoencoderTrainer:
         writing the training losses and validation losses for each epoch into 
         the checkpoint folder.
         """
-
-        # Compute initial loss after model initialization
-        with torch.no_grad():
-            initial_loss = self._run_epoch(self.train_loader, training=False)
         
-        training_losses, val_losses = np.array([]), np.array([initial_loss])
+        training_losses, val_losses = np.array([]), np.array([])
         start_epoch = 0
         min_validation_loss = 99999.0
         num_epochs = self._get_num_epochs()
