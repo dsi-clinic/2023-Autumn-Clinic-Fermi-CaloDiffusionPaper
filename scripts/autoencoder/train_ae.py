@@ -397,19 +397,30 @@ if __name__ == "__main__":
                 0, model.nsteps, (data.size()[0],), device=device
             ).long()
 
-            batch_loss = model.compute_loss(
+            batch_loss_dict = model.compute_loss(
                 data,
                 E,
                 t=t,
                 loss_type=flags.loss_type,
                 energy_loss_scale=energy_loss_scale,
             )
+
+            # Get the total loss for backward pass
+            batch_loss = batch_loss_dict["loss"]
             batch_loss.backward()
 
             optimizer.step()
             train_loss += batch_loss.item()
 
-            del data, E, batch_loss
+            # For logging, you can track individual components
+            if i == 0:  # Initialize tracking variables at the start of each epoch
+                recon_losses = batch_loss_dict["recon_loss"].item()
+                kl_losses = batch_loss_dict["kl_loss"].item()
+            else:
+                recon_losses += batch_loss_dict["recon_loss"].item()
+                kl_losses += batch_loss_dict["kl_loss"].item()
+
+            del data, E, batch_loss_dict
 
         train_loss = train_loss / len(loader_train)
         training_losses = np.append(training_losses, train_loss)
@@ -428,7 +439,7 @@ if __name__ == "__main__":
                     0, model.nsteps, (vdata.size()[0],), device=device
                 ).long()
 
-                batch_loss = model.compute_loss(
+                batch_loss_dict = model.compute_loss(
                     vdata,
                     vE,
                     t=t,
@@ -436,8 +447,9 @@ if __name__ == "__main__":
                     energy_loss_scale=energy_loss_scale,
                 )
 
+                batch_loss = batch_loss_dict["loss"]
                 val_loss += batch_loss.item()
-                del vdata, vE, batch_loss
+                del vdata, vE, batch_loss_dict
 
             val_loss = val_loss / len(loader_val)
             val_losses = np.append(val_losses, val_loss)
