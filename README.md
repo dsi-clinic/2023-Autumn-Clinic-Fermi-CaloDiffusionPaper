@@ -60,7 +60,7 @@ python3 scripts/autoencoder/train_ae.py \
 Compression factor $c$ is controlled by the `--layer_sizes` flag, which is a list of the number of input channels into the autoencoder ResNet blocks. The formula to determine compression factor from a given layer sizes input is seen below. 
 
 **Compression Factor from Layer Sizes Formula**\
-$$\frac{2^{3*(|\ell|-1)}}{\ell_{-1}/4}$$
+$$\frac{2^{3*(|\ell|-2)}}{\ell_{-1}/4}$$
 
 * $\ell$ refers to the list passed in the `--layer_sizes` flag
 * $|\ell|$ is the length of layer sizes list
