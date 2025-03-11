@@ -1,28 +1,25 @@
-from enum import Enum
-from fractions import Fraction
-from einops import rearrange
 import copy
 import math
+from enum import Enum
+from fractions import Fraction
+from functools import partial
+from inspect import isfunction
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-
-from inspect import isfunction
-from functools import partial
+from einops import rearrange
 
 
 def exists(x):
-    """
-    Checks if x is not None.
+    """Checks if x is not None.
     """
     return x is not None
 
 
 def default(val, d):
-    """
-    Returns val if it exists, otherswise returns d.
+    """Returns val if it exists, otherswise returns d.
     If d is a function, call it and return its value.
     """
     if exists(val):
@@ -31,8 +28,7 @@ def default(val, d):
 
 
 def cosine_beta_schedule(nsteps, s=0.008):
-    """
-    Generate a cosine schedule for beta values as proposed in https://arxiv.org/abs/2102.09672.
+    """Generate a cosine schedule for beta values as proposed in https://arxiv.org/abs/2102.09672.
 
     Parameters:
     - nsteps (int): Number of steps in the schedule.
@@ -48,12 +44,11 @@ def cosine_beta_schedule(nsteps, s=0.008):
     return torch.clip(betas, 0.0001, 0.9999)
 
 
-# Custom Convolutional Layers.  
+# Custom Convolutional Layers.
 
 
 class CylindricalConvTrans(nn.Module):
-    """
-    Cylindrical 3D Transposed Convolution layer.
+    """Cylindrical 3D Transposed Convolution layer.
 
     Assumes input tensor format: (batch_size, channels, z_bin, phi_bin, r_bin)
     """
@@ -88,8 +83,7 @@ class CylindricalConvTrans(nn.Module):
         )
 
     def forward(self, x):
-        """
-        Forward pass for the cylindrical transposed convolution.
+        """Forward pass for the cylindrical transposed convolution.
 
         Pads the phi_bin dimension circularly before applying convolution.
         """
@@ -104,135 +98,141 @@ class CylindricalConvTrans(nn.Module):
 
 
 class FractionalResizeLayer(nn.Module):
-    """
-    Applies a Transposed Convolution, then a Convolution to achieve the effect
-    of resizing by a fractional amount. The output size's spatial dimensions is 
-    the fraction times the input size. 
+    """Applies a Transposed Convolution, then a Convolution to achieve the effect
+    of resizing by a fractional amount. The output size's spatial dimensions is
+    the fraction times the input size.
 
     Assumes input tensor format: (batch_size, channels, z_bin, phi_bin, r_bin)
 
     Upsampling Example: 256x256x256 image by 3/2  -> 384x384x384
-    N x C x 256 x 256 x 256 -(numerator=3, denominator=2)> N x C x 384 x 384 x 384 
+    N x C x 256 x 256 x 256 -(numerator=3, denominator=2)> N x C x 384 x 384 x 384
 
     Downsampling Example: 384x384x384 image by 2/3  -> 256x256x256
     N x C x 384 x 384 x 384 -(numerator=2, denominator=3)> N x C x 256 x 256 x 256
     """
-    def __init__(self,
+
+    def __init__(
+        self,
         in_channels,
         kernel_size=(3, 4, 4),
         padding=0,  # TODO: do we need different paddings for learned upsampling and learned downsampling
         output_padding=0,
-        numerator=3, 
-        denominator=2):
-
+        numerator=3,
+        denominator=2,
+    ):
         super().__init__()
         self.numerator = numerator
         self.denominator = denominator
 
         self.cylinConvTrans = CylindricalConvTrans(
-            in_channels,    
-            in_channels,    # not changing the number of channels
+            in_channels,
+            in_channels,  # not changing the number of channels
             kernel_size=kernel_size,
             stride=(numerator, numerator, numerator),
             padding=padding,
-            output_padding=output_padding
+            output_padding=output_padding,
         )
 
         self.cylinConv = CylindricalConv(
-            in_channels, 
-            in_channels,    # not changing the number of channels
-            kernel_size=kernel_size, 
-            stride=denominator, 
-            padding=padding 
+            in_channels,
+            in_channels,  # not changing the number of channels
+            kernel_size=kernel_size,
+            stride=denominator,
+            padding=padding,
         )
 
     def forward(self, x):
         input_shape = x.shape
-        expected_bigger_shape = torch.Size([input_shape[0], 
-                                    input_shape[1], 
-                                    input_shape[2]*self.numerator, 
-                                    input_shape[3]*self.numerator, 
-                                    input_shape[4]*self.numerator])
+        expected_bigger_shape = torch.Size(
+            [
+                input_shape[0],
+                input_shape[1],
+                input_shape[2] * self.numerator,
+                input_shape[3] * self.numerator,
+                input_shape[4] * self.numerator,
+            ]
+        )
         x = self.cylinConvTrans(x)
-        assert x.shape == expected_bigger_shape , (x.shape, expected_bigger_shape)
+        assert x.shape == expected_bigger_shape, (x.shape, expected_bigger_shape)
         x = self.cylinConv(x)
         input2_shape = x.shape
-        expected_smaller_shape = torch.Size([input2_shape[0], 
-                            input2_shape[1], 
-                            input2_shape[2]//self.denominator, 
-                            input2_shape[3]//self.denominator, 
-                            input2_shape[4]//self.denominator])
+        expected_smaller_shape = torch.Size(
+            [
+                input2_shape[0],
+                input2_shape[1],
+                input2_shape[2] // self.denominator,
+                input2_shape[3] // self.denominator,
+                input2_shape[4] // self.denominator,
+            ]
+        )
         assert x.shape == expected_smaller_shape, (x.shape, expected_smaller_shape)
 
         return x
-    
 
-        
+
 class FractionalResizeTrilinear(nn.Module):
-    """
-    A module for fractional resizing using trilinear interpolation in a U-Net autoencoder.
+    """A module for fractional resizing using trilinear interpolation in a U-Net autoencoder.
 
-    This module computes a sequence of target spatial dimensions (depth, height, width) by scaling 
-    the input shape by a factor (numerator/denominator). The sequence is generated by progressively 
-    downsampling until one or more dimensions become too small (<=2) or a specified number of steps 
-    (num_samples) is reached, and then mirroring these shapes (excluding the smallest) to form an upsampling 
-    path. These computed shapes are determined during the first forward pass and stored as internal, 
-    class-level attributes—meaning they are not provided at instantiation but are computed when processing 
+    This module computes a sequence of target spatial dimensions (depth, height, width) by scaling
+    the input shape by a factor (numerator/denominator). The sequence is generated by progressively
+    downsampling until one or more dimensions become too small (<=2) or a specified number of steps
+    (num_samples) is reached, and then mirroring these shapes (excluding the smallest) to form an upsampling
+    path. These computed shapes are determined during the first forward pass and stored as internal,
+    class-level attributes—meaning they are not provided at instantiation but are computed when processing
     the first input.
 
-    The reset_step() method is provided for training scenarios, such as during autoencoder training with 
-    multiple epochs. Resetting the internal step counter at the start of each epoch ensures that the 
+    The reset_step() method is provided for training scenarios, such as during autoencoder training with
+    multiple epochs. Resetting the internal step counter at the start of each epoch ensures that the
     resizing sequence starts from the beginning for every new epoch, maintaining consistency across batches.
     """
+
     _start_shape = None
     _all_output_shapes = None
     _is_first = True
     _current_step = 0
 
     def _calculate_all_shapes(self, start_shape):
-        """
-        Compute the sequence of target shapes based on the input's spatial dimensions.
+        """Compute the sequence of target shapes based on the input's spatial dimensions.
 
-        This method scales the input shape iteratively by (numerator/denominator) for up to num_samples 
-        iterations or until any dimension becomes too small (<=2). It then appends the reversed sequence 
+        This method scales the input shape iteratively by (numerator/denominator) for up to num_samples
+        iterations or until any dimension becomes too small (<=2). It then appends the reversed sequence
         (excluding the smallest shape) to create an upsampling path.
 
         Args:
             start_shape (tuple): The initial spatial dimensions of the input tensor.
 
         Returns:
-            list of tuple: The list of starting shape and target shapes for each interpolation step 
+            list of tuple: The list of starting shape and target shapes for each interpolation step
             (downsampling then upsampling).
         """
         shapes = [start_shape]
         current_shape = start_shape
         scale = self.numerator / self.denominator
-        
+
         # Calculate downsampling shapes
-        for _ in range(self.num_samples): 
+        for _ in range(self.num_samples):
             if any(x <= 2 for x in current_shape):
                 # Prevent compresing to super small sizes
                 shapes.append(current_shape)
                 continue
 
             next_shape = tuple(int(x * scale) for x in current_shape)
-                
+
             shapes.append(next_shape)
             current_shape = next_shape
-        
+
         # Add upsampling shapes (reverse path excluding the smallest shape)
         shapes.extend(shapes[-2::-1])
         print("Data dimensions will be: ", shapes)
         return shapes
 
     def __init__(self, numerator=2, denominator=3, num_samples=-1):
-        """
-        Initialize FractionalResizeTrilinear.
+        """Initialize FractionalResizeTrilinear.
 
         Args:
             numerator (int, optional): Numerator of the scaling factor. Defaults to 2.
             denominator (int, optional): Denominator of the scaling factor. Defaults to 3.
-            num_samples (int, optional): Maximum number of downsampling steps. 
+            num_samples (int, optional): Maximum number of downsampling steps.
                 A negative value indicates no preset limit.
         """
         super().__init__()
@@ -241,12 +241,11 @@ class FractionalResizeTrilinear(nn.Module):
         self.num_samples = num_samples
 
     def forward(self, x):
-        """
-        Resize the input tensor to a target shape using trilinear interpolation.
+        """Resize the input tensor to a target shape using trilinear interpolation.
 
-        On the first call, the method computes and caches the sequence of target 
-        shapes based on the input's spatial dimensions. For subsequent calls, 
-        it selects the next shape from the sequence and increments 
+        On the first call, the method computes and caches the sequence of target
+        shapes based on the input's spatial dimensions. For subsequent calls,
+        it selects the next shape from the sequence and increments
         the internal step counter.
 
         Args:
@@ -259,60 +258,64 @@ class FractionalResizeTrilinear(nn.Module):
 
         spatial_dims = tuple(x.shape[-3:])
 
-        # Only executed the first forward pass 
+        # Only executed the first forward pass
         if FractionalResizeTrilinear._is_first:
             FractionalResizeTrilinear._start_shape = spatial_dims
-            FractionalResizeTrilinear._all_output_shapes = self._calculate_all_shapes(spatial_dims)
+            FractionalResizeTrilinear._all_output_shapes = self._calculate_all_shapes(
+                spatial_dims
+            )
             FractionalResizeTrilinear._is_first = False
 
         # Increment step counter based on the number of times it's called
-        if FractionalResizeTrilinear._current_step == len(FractionalResizeTrilinear._all_output_shapes) - 1:
+        if (
+            FractionalResizeTrilinear._current_step
+            == len(FractionalResizeTrilinear._all_output_shapes) - 1
+        ):
             # Reset current step counter back to 0 if all the downsampling/upsampling steps are done
             FractionalResizeTrilinear._current_step = 0
-        
 
         try:
-            desired_shape = FractionalResizeTrilinear._all_output_shapes[FractionalResizeTrilinear._current_step]
+            desired_shape = FractionalResizeTrilinear._all_output_shapes[
+                FractionalResizeTrilinear._current_step
+            ]
         except:
             return x
-        
 
         x = F.interpolate(x, size=desired_shape)
 
         return x
-    
-        
-class ResizeMethod(Enum):
-    """
-    Enum for different tensor resizing methods. CYLIN_FRAC_LEARNED and 
-    CYLIN_FRAC_INTERPOLATE are options that allow for more flexibility in 
-    upsampling and downsampling. 
 
-    SIMPLE_INT_CONV: Uses pytorch's nn.Conv3d for a convolution layer or 
+
+class ResizeMethod(Enum):
+    """Enum for different tensor resizing methods. CYLIN_FRAC_LEARNED and
+    CYLIN_FRAC_INTERPOLATE are options that allow for more flexibility in
+    upsampling and downsampling.
+
+    SIMPLE_INT_CONV: Uses pytorch's nn.Conv3d for a convolution layer or
         nn.ConvTranspose3d for a transposed convolution layer. No padding applied
         beforehand, and only allows compression by an integer factor.
-    CYLIN_INT_CONV: Uses CylindricalConv for a convolution layer or 
+    CYLIN_INT_CONV: Uses CylindricalConv for a convolution layer or
         CylindricalConvTrans for a transposed convolution layer. Padding is applied
         beforehand, and only allows compression by an integer factor.
-    CYLIN_FRAC_LEARNED: Applies both convolution and transposed convolutions 
-        for one resizing step. Padding is applied, and this combo allows for 
+    CYLIN_FRAC_LEARNED: Applies both convolution and transposed convolutions
+        for one resizing step. Padding is applied, and this combo allows for
         the effect of fractional strides.
-    CYLIN_FRAC_INTERPOLATE: For one resizing step, uses only pytorch's 
+    CYLIN_FRAC_INTERPOLATE: For one resizing step, uses only pytorch's
         nn.interpolate, but this function does not learn any parameters. Padding
         is applied, and this combo allows for the effect of fractional strides.
     """
+
     SIMPLE_INT_CONV = "simple-int-conv"
     CYLIN_INT_CONV = "cylindrical-int-conv"
     CYLIN_FRAC_LEARNED = "cylindrical-frac-learned"
-    CYLIN_FRAC_INTERPOLATE =  "cylindrical-frac-interpolate"
+    CYLIN_FRAC_INTERPOLATE = "cylindrical-frac-interpolate"
 
     def __str__(self):
         return self.value
 
-    
+
 class CylindricalConv(nn.Module):
-    """
-    Cylindrical 3D Convolution layer.
+    """Cylindrical 3D Convolution layer.
 
     Assumes input tensor format: (batch_size, channels, z_bin, phi_bin, r_bin)
     """
@@ -343,8 +346,7 @@ class CylindricalConv(nn.Module):
         )
 
     def forward(self, x):
-        """
-        Forward pass for the cylindrical convolution.
+        """Forward pass for the cylindrical convolution.
 
         Pads the phi_bin dimension circularly before applying convolution.
         """
@@ -361,8 +363,7 @@ class CylindricalConv(nn.Module):
 
 
 class Residual(nn.Module):
-    """
-    Residual connection module.
+    """Residual connection module.
 
     Applies a function and adds the input to the output (residual connection).
     """
@@ -376,8 +377,7 @@ class Residual(nn.Module):
 
 
 def extract(a, t, x_shape):
-    """
-    Extract values from a tensor and reshape for broadcasting.
+    """Extract values from a tensor and reshape for broadcasting.
 
     Parameters:
     - a (torch.Tensor): Tensor to extract from.
@@ -396,8 +396,7 @@ def extract(a, t, x_shape):
 
 
 class SinusoidalPositionEmbeddings(nn.Module):
-    """
-    Sinusoidal position embedding module.
+    """Sinusoidal position embedding module.
 
     Generates embeddings for time steps.
     """
@@ -407,8 +406,7 @@ class SinusoidalPositionEmbeddings(nn.Module):
         self.dim = dim
 
     def forward(self, time):
-        """
-        Forward pass to generate embeddings.
+        """Forward pass to generate embeddings.
 
         Parameters:
         - time (torch.Tensor): Time steps tensor.
@@ -429,8 +427,7 @@ class SinusoidalPositionEmbeddings(nn.Module):
 
 
 class Block(nn.Module):
-    """
-    Basic convolutional block with optional group normalization and activation.
+    """Basic convolutional block with optional group normalization and activation.
     """
 
     def __init__(self, dim, dim_out, groups=8, cylindrical=False):
@@ -458,8 +455,7 @@ class Block(nn.Module):
 
 
 class ResnetBlock(nn.Module):
-    """
-    ResNet block with optional conditional embedding.
+    """ResNet block with optional conditional embedding.
 
     Reference: https://arxiv.org/abs/1512.03385
     """
@@ -502,8 +498,7 @@ class ResnetBlock(nn.Module):
 
 
 class ConvNextBlock(nn.Module):
-    """
-    ConvNeXt block with optional conditional embedding.
+    """ConvNeXt block with optional conditional embedding.
 
     Reference: https://arxiv.org/abs/2201.03545
     """
@@ -554,8 +549,7 @@ class ConvNextBlock(nn.Module):
 
 
 class Attention(nn.Module):
-    """
-    Multi-head self-attention module.
+    """Multi-head self-attention module.
     """
 
     def __init__(self, dim, heads=4, dim_head=32, cylindrical=False):
@@ -595,8 +589,7 @@ class Attention(nn.Module):
 
 
 class LinearAttention(nn.Module):
-    """
-    Linear attention module for computational efficiency.
+    """Linear attention module for computational efficiency.
     """
 
     def __init__(self, dim, heads=1, dim_head=32, cylindrical=False):
@@ -659,11 +652,14 @@ class PreNorm(nn.Module):
 
 
 def Upsample(
-    dim, extra_upsample=[0, 0, 0], resize_method=ResizeMethod.CYLIN_INT_CONV,
-    compress_Z=False, compress=2, num_of_samples=-1
+    dim,
+    extra_upsample=[0, 0, 0],
+    resize_method=ResizeMethod.CYLIN_INT_CONV,
+    compress_Z=False,
+    compress=2,
+    num_of_samples=-1,
 ):
-    """
-    Upsampling layer in 2 dimensions while optionally compressing the Z dimension.
+    """Upsampling layer in 2 dimensions while optionally compressing the Z dimension.
 
     Parameters:
     - dim (int): Input dimension.
@@ -689,7 +685,7 @@ def Upsample(
             padding=1,
             output_padding=extra_upsample,
         )
-    
+
     if resize_method == ResizeMethod.SIMPLE_INT_CONV:
         return nn.ConvTranspose3d(
             dim,
@@ -703,23 +699,30 @@ def Upsample(
     # Methods to achieve a non-integer compression factor
     fraction = Fraction(compress).limit_denominator()
     if resize_method == ResizeMethod.CYLIN_FRAC_LEARNED:
-        return FractionalResizeLayer(in_channels=dim, 
-                                    kernel_size=(3,4,4),
-                                    padding=0,
-                                    output_padding=0,
-                                    numerator=fraction.numerator,
-                                    denominator=fraction.denominator
-                                    )
-    
-    return FractionalResizeTrilinear(numerator=fraction.numerator, 
-                                        denominator=fraction.denominator,
-                                        num_samples=num_of_samples)
+        return FractionalResizeLayer(
+            in_channels=dim,
+            kernel_size=(3, 4, 4),
+            padding=0,
+            output_padding=0,
+            numerator=fraction.numerator,
+            denominator=fraction.denominator,
+        )
+
+    return FractionalResizeTrilinear(
+        numerator=fraction.numerator,
+        denominator=fraction.denominator,
+        num_samples=num_of_samples,
+    )
 
 
-def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV, 
-               compress_Z=False, compress=2, num_of_samples=-1):
-    """
-    Downsampling layer in 2 dimensions while optionally compressing the Z dimension.
+def Downsample(
+    dim,
+    resize_method=ResizeMethod.CYLIN_INT_CONV,
+    compress_Z=False,
+    compress=2,
+    num_of_samples=-1,
+):
+    """Downsampling layer in 2 dimensions while optionally compressing the Z dimension.
 
     Parameters:
     - dim (int): Input dimension.
@@ -732,7 +735,7 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
     - nn.Module: Downsampling layer.
     """
     Z_stride = compress if compress_Z else 1
-    if resize_method == ResizeMethod.SIMPLE_INT_CONV: 
+    if resize_method == ResizeMethod.SIMPLE_INT_CONV:
         return nn.Conv3d(
             dim,
             dim,
@@ -740,7 +743,7 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
             stride=(Z_stride, compress, compress),
             padding=1,
         )
-    
+
     if resize_method == ResizeMethod.CYLIN_INT_CONV:
         return CylindricalConv(
             dim,
@@ -753,18 +756,21 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
     fraction = Fraction(compress).limit_denominator()
 
     if resize_method == ResizeMethod.CYLIN_FRAC_LEARNED:
-        return FractionalResizeLayer(in_channels=dim, 
-                                    kernel_size=(3,4,4),
-                                    padding=0,
-                                    output_padding=0,
-                                    numerator=fraction.numerator,
-                                    denominator=fraction.denominator
-                                    )
+        return FractionalResizeLayer(
+            in_channels=dim,
+            kernel_size=(3, 4, 4),
+            padding=0,
+            output_padding=0,
+            numerator=fraction.numerator,
+            denominator=fraction.denominator,
+        )
     # we swap numerator and denom. to downsample. 1.5 as compress -> num.=2, denom.=3
-    return FractionalResizeTrilinear(numerator=fraction.denominator, 
-                                        denominator=fraction.numerator,
-                                        num_samples=num_of_samples)
-    
+    return FractionalResizeTrilinear(
+        numerator=fraction.denominator,
+        denominator=fraction.numerator,
+        num_samples=num_of_samples,
+    )
+
     # Alternative using average pooling
     # return nn.AvgPool3d(kernel_size=(1,2,2), stride=(1,2,2), padding=0)
 
@@ -773,8 +779,7 @@ def Downsample(dim, resize_method=ResizeMethod.CYLIN_INT_CONV,
 
 
 class FCN(nn.Module):
-    """
-    Fully Connected Network with optional time and condition embeddings.
+    """Fully Connected Network with optional time and condition embeddings.
 
     Parameters:
     - dim_in (int): Input dimension.
@@ -841,8 +846,7 @@ class FCN(nn.Module):
         self.main_mlp = nn.Sequential(*out_layers)
 
     def forward(self, x, cond, time):
-        """
-        Forward pass of the FCN.
+        """Forward pass of the FCN.
 
         Parameters:
         - x (torch.Tensor): Input tensor.
@@ -864,8 +868,7 @@ class FCN(nn.Module):
 
 class CondAE(nn.Module):
     # Unet with conditional layers
-    """
-    Conditional autoencoder derived from the u-net structure that encodes original data into latent space
+    """Conditional autoencoder derived from the u-net structure that encodes original data into latent space
     to reduce dimensionality and reconstruct encoded data back into its original shape (decoding)
 
     Parameters:
@@ -928,12 +931,12 @@ class CondAE(nn.Module):
             self.init_conv = nn.Conv3d(
                 channels, layer_sizes[0], kernel_size=3, padding=1
             )
-            cylindrical=False   
+            cylindrical = False
         else:
             self.init_conv = CylindricalConv(
                 channels, layer_sizes[0], kernel_size=3, padding=1
             )
-            cylindrical=True    # Used to inform instantiation of blocks
+            cylindrical = True  # Used to inform instantiation of blocks
 
         # Chose block type (ResNet or ConvNeXt)
         if use_convnext:
@@ -1027,7 +1030,9 @@ class CondAE(nn.Module):
                 self.extra_upsamples.append(extra_upsample_dim)
 
             # Append downsampling blocks
-            no_identity_needed = self.resize_method == ResizeMethod.CYLIN_FRAC_INTERPOLATE
+            no_identity_needed = (
+                self.resize_method == ResizeMethod.CYLIN_FRAC_INTERPOLATE
+            )
             self.downs.append(
                 nn.ModuleList(
                     [
@@ -1037,8 +1042,8 @@ class CondAE(nn.Module):
                             dim_out,
                             resize_method=self.resize_method,
                             compress_Z=compress_Z,
-                            compress=self.compress, 
-                            num_of_samples = len(in_out)
+                            compress=self.compress,
+                            num_of_samples=len(in_out),
                         )
                         if not is_last or no_identity_needed
                         else nn.Identity(),
@@ -1081,7 +1086,7 @@ class CondAE(nn.Module):
                             self.resize_method,
                             compress_Z=compress_Z,
                             compress=self.compress,
-                            num_of_samples = len(in_out)
+                            num_of_samples=len(in_out),
                         )
                         if not is_last or no_identity_needed
                         else nn.Identity(),
@@ -1107,8 +1112,7 @@ class CondAE(nn.Module):
         )
 
     def forward(self, x, cond, time):
-        """
-        Class function that performs the full forward pass the both encodes the original data, passes it through a linear attention,
+        """Class function that performs the full forward pass the both encodes the original data, passes it through a linear attention,
         and decodes the encoded data to reconstruct it back to its original shape
 
         Parameters:
@@ -1157,8 +1161,7 @@ class CondAE(nn.Module):
         return x
 
     def encode(self, x, cond):
-        """
-        Class function that performs only the encoding step in the conditional u-net to transform original data into a lower
+        """Class function that performs only the encoding step in the conditional u-net to transform original data into a lower
         dimensional space to generated a latent space
 
         Parameters:
@@ -1188,8 +1191,7 @@ class CondAE(nn.Module):
         return x  # Return latent representation
 
     def decode(self, x, cond):
-        """
-        Class function that performs only the decoding step in the conditional u-net to transform encoded data into its original dimension size
+        """Class function that performs only the decoding step in the conditional u-net to transform encoded data into its original dimension size
         or otherwise transforming latent space shape into original shape
 
         Parameters:
