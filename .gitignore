@@ -2,6 +2,7 @@
 *.swp
 *.txt
 *.pyc
+*.stdout
+*.stderr
 slurm/diffu*
-/.idea
-
+*.pth
