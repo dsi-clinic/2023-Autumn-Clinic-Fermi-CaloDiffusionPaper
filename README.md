@@ -8,7 +8,8 @@ format`.
 3. `/scripts/autoencoder/ae_hyper_explore/dataset2_analysis.ipynb`  
 4. `/scripts/autoencoder/ae_hyper_explore/LR_analysis.ipynb`  
 5. `/scripts/autoencoder/ae_models.py`  
-6. `/scripts/train_diffu_class.py`  
+6. `/scripts/train_diffu_class.py`
+7. `/scripts/autoencoder/train_ae_class.py`
 
 # DSI Clinic Initial Week
 
