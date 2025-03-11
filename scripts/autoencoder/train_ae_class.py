@@ -22,8 +22,8 @@ from typing import Tuple
 import torch
 import torch.optim as optim
 import torch.utils.data as torchdata
-import tqdm
 from CaloEnco import CaloEnco
+from tqdm import tqdm
 
 from CaloChallenge.code.XMLHandler import XMLHandler
 from scripts.utils import DataLoader, EarlyStopper, LoadJson, NNConverter
@@ -341,8 +341,8 @@ class AutoencoderTrainer:
             model.load_state_dict(self.checkpoint)
 
         # Backup files for model definition and config
-        os.system(f"cp ae_models.py {self.checkpoint_folder}")
-        os.system(f"cp {self.args.config} {self.checkpoint_folder}")
+        os.system(f"cp ae_models.py {self.checkpoint_folder}")  # noqa
+        os.system(f"cp {self.args.config} {self.checkpoint_folder}")  # noqa
 
         return model
 
@@ -454,10 +454,10 @@ class AutoencoderTrainer:
 
     def _write_losses(self, loss_array: np.ndarray, filename: str) -> None:
         """Writes all the losses in the given loss_array to a filename.txt file."""
-        with Path.open(
-            self.checkpoint_folder + "/" + filename + "_class.txt", "w"
-        ) as fileout:
-            fileout.write("\n".join(f"{tl}" for tl in loss_array) + "\n")
+        path = Path(self.checkpoint_folder) / filename
+        with path.open("w") as f:
+            for loss in loss_array:
+                f.write(f"{loss}\n")
 
     def train(self) -> None:
         """Train the model for specified number of epochs.
