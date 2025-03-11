@@ -56,12 +56,12 @@ python3 scripts/autoencoder/train_ae.py \
 * If you need to continue pick up training, can use the `--load` flag to load in checkpoint and resume training
 * Autoencoders compress input data by a *compression factor* denoted as $c$. $c$ = original dimensionality / compressed dimensionality.
 * Higher compression means faster latent diffusion models but there is an accuracy tradeoff
+* Understand the compression rates and how they modify data size exactly [here](https://github.com/dsi-clinic/2023-Autumn-Clinic-Fermi-CaloDiffusionPaper/blob/main/scripts/autoencoder/ae_hyper_explore/compression_rates.ipynb)
 
 Compression factor $c$ is controlled by the `--layer_sizes` flag, which is a list of the number of input channels into the autoencoder ResNet blocks. The formula to determine compression factor from a given layer sizes input is seen below. 
 
-**Compression Factor from Layer Sizes Formula**
-
-$$c = \frac{3*2^{3*(|\ell|-2)}}{\ell_{-1}}$$
+**Compression Factor from Layer Sizes Formula**\
+$$\frac{2^{3*(|\ell|-2)}}{\ell_{-1}/4}$$
 
 * $\ell$ refers to the list passed in the `--layer_sizes` flag
 * $|\ell|$ is the length of layer sizes list
