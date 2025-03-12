@@ -10,6 +10,7 @@ format`.
 5. `/scripts/autoencoder/ae_models.py`  
 6. `/scripts/train_diffu_class.py`
 7. `/scripts/autoencoder/train_ae_class.py`
+8. `/scripts/ae_eval_fpd.py`
 
 # DSI Clinic Initial Week
 
