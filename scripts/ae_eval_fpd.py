@@ -1,48 +1,49 @@
-"""
-This script contains a refactored version of train_ae.py. To run this python
-script to train an autoencoder, modify train_ae_4x64.sh or train_ae_4x32_ds3.sh 
-to use train_ae_class.py instead of train_ae.py. The model training loss, 
-validation losses, and the Frechet physics distance will be saved within 
-a sub-subfolder inside the ae_models folder, which can be found 
-outside of the 2023-Autumn-Clinic...folder. 
-For testing purposes during development, set the the take_subset parameter 
-inside the main block to True when initializing the AutoencoderTrainer. 
+"""This script contains a refactored version of train_ae.py.
+
+To run this python script to train an autoencoder, modify train_ae_4x64.sh or 
+train_ae_4x32_ds3.shto use train_ae_class.py instead of train_ae.py. The model training loss,
+validation losses, and the Frechet physics distance will be saved within
+a sub-subfolder inside the ae_models folder, which can be found
+outside of the 2023-Autumn-Clinic...folder.
+For testing purposes during development, set the the take_subset parameter
+inside the main block to True when initializing the AutoencoderTrainer.
 This will run the training script with only 500 rows of data.
 """
 
-from typing import Optional
-import numpy as np
 import os
+from typing import Optional
+
+import numpy as np
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import argparse
+import os
+from pathlib import Path
 
+import jetnet
 import torch
 import torch.optim as optim
 import torch.utils.data as torchdata
-import os
-from typing import Tuple, Optional
+from tqdm import tqdm
 
 from autoencoder.CaloEnco import CaloEnco
-import jetnet 
-import tqdm
-from scripts.utils import NNConverter, LoadJson, DataLoader, EarlyStopper, nn
-from scripts.utils import *
-from CaloChallenge.code.XMLHandler import *
+from CaloChallenge.code.XMLHandler import XMLHandler
+from scripts.utils import DataLoader, EarlyStopper, LoadJson, NNConverter
+
 
 class AutoencoderTrainer:
-    """
-    A trainer class for Autoencoder models.
+    """A trainer class for Autoencoder models.
 
-    The train() method handles data loading, model setup, training loop 
+    The train() method handles data loading, model setup, training loop
     execution, and checkpoint management.
     """
 
-    def __init__(self, set_seed=False,take_subset=False):
-        """
-        Initialize the autoencoder trainer. First loads the config file 
+    def __init__(self, set_seed: bool = False, take_subset: bool = False) -> None:
+        """Initialize the autoencoder trainer.
+        
+        First loads the config file
         and optional CLI arguments, which inform the setup for training. By
-        default, does not set a random seed 
+        default, does not set a random seed
         """
         self.device = self._set_device()
         self.args = self._parse_cli_arguments()
@@ -52,14 +53,12 @@ class AutoencoderTrainer:
         self.checkpoint_folder = self._create_checkpoint_folder(set_seed, take_subset)
         self.nn_embed = self._setup_nn_embedding()
         self.model = self._initialize_model()
-        self.optimizer, self.scheduler, self.early_stopper = \
+        self.optimizer, self.scheduler, self.early_stopper = (
             self._setup_training_components()
+        )
 
     def _set_device(self) -> torch.device:
-        """ 
-        Determines and sets up the computing device, using the GPU 
-        when available.
-        """
+        """Determines and sets up the computing device, using the GPU when available."""
         if torch.cuda.is_available():
             print("Using CUDA")
             return torch.device("cuda")
@@ -67,9 +66,7 @@ class AutoencoderTrainer:
         return torch.device("cpu")
 
     def _parse_cli_arguments(self) -> argparse.Namespace:
-        """
-        Parse command line arguments for training configuration.
-        """
+        """Parse command line arguments for training configuration."""
         parser = argparse.ArgumentParser()
         parser.add_argument(
             "--data_folder",
@@ -98,16 +95,13 @@ class AutoencoderTrainer:
             default=False,
             help="Load pretrained weights to continue the training",
         )
-        parser.add_argument("--seed", type=int, default=1234, 
-                            help="Pytorch seed")
+        parser.add_argument("--seed", type=int, default=1234, help="Pytorch seed")
         parser.add_argument(
-            "--reset_training", action="store_true", default=False, 
-            help="Retrain"
+            "--reset_training", action="store_true", default=False, help="Retrain"
         )
         parser.add_argument("--binning_file", type=str, default=None)
         parser.add_argument(
-            "--patience", type=int, default=25, 
-            help="Patience for early stopper"
+            "--patience", type=int, default=25, help="Patience for early stopper"
         )
         parser.add_argument(
             "--min_delta",
@@ -129,8 +123,7 @@ class AutoencoderTrainer:
             help="Optional path to use for training folder instead of \
             default ..",
         )
-        parser.add_argument("--resnet_set", type=int, nargs="+", 
-                            default=[0, 1, 2])
+        parser.add_argument("--resnet_set", type=int, nargs="+", default=[0, 1, 2])
         parser.add_argument(
             "--layer_sizes",
             type=int,
@@ -160,10 +153,8 @@ class AutoencoderTrainer:
 
         return parser.parse_args()
 
-    def _set_random_seed(self, set_seed):
-        """
-        Sets the pytorch and numpy random seeds.
-        """
+    def _set_random_seed(self, set_seed: bool) -> None:
+        """Sets the pytorch and numpy random seeds."""
         torch.manual_seed(self.args.seed)
         if set_seed:
             np.random.seed(self.args.seed)
@@ -172,19 +163,17 @@ class AutoencoderTrainer:
                 torch.cuda.manual_seed_all(self.args.seed)
                 torch.backends.cudnn.deterministic = True
                 torch.backends.cudnn.benchmark = False
-    
-    def _prepare_datasets(self, take_subset) -> Tuple[torchdata.DataLoader, 
-                                          torchdata.DataLoader]:
-        """
-        Reshape the data as needed and split data into training and 
-        validation datasets.
-        """
+
+    def _prepare_datasets(
+        self, take_subset: bool
+    ) -> tuple[torchdata.DataLoader, torchdata.DataLoader]:
+        """Reshape the data as needed and split data into training and validation datasets."""
         orig_shape = "orig" in self.config.get("SHOWER_EMBED", "")
         shape_pad = self.config["SHAPE_PAD"]
         data, energies = [], []
         for i, dataset in enumerate(self.config["FILES"]):
             data_, e_ = DataLoader(
-                os.path.join(self.args.data_folder, dataset),
+                Path(self.args.data_folder) / dataset,
                 shape_pad,
                 emax=self.config["EMAX"],
                 emin=self.config["EMIN"],
@@ -194,29 +183,31 @@ class AutoencoderTrainer:
                 ],  # Noise can generate more deposited energy than generated
                 logE=self.config["logE"],
                 showerMap=self.config["SHOWERMAP"],
-                nholdout=self.config.get("HOLDOUT", 0) if (i == len(self.config["FILES"]) - 1) else 0,
+                nholdout=self.config.get("HOLDOUT", 0)
+                if (i == len(self.config["FILES"]) - 1)
+                else 0,
                 dataset_num=self.config.get("DATASET_NUM", 2),
                 orig_shape=orig_shape,
             )
-            
+
             data = data_ if i == 0 else np.concatenate((data, data_))
             energies = e_ if i == 0 else np.concatenate((energies, e_))
-        
+
         # Reshape data based on the SHOWER_EMBED config value
         energies = np.reshape(energies, (-1))
         if not orig_shape:
             data = np.reshape(data, shape_pad)
         else:
             data = np.reshape(data, (len(data), -1))
-        
+
         print("DATA SHAPE BEFORE", data.shape, energies.shape)
         if take_subset:
-            data, energies = data[:500,:], energies[:500]
+            data, energies = data[:500, :], energies[:500]
             print("DATA SHAPE AFTER", data.shape, energies.shape)
 
         torch_data_tensor = torch.from_numpy(data)
         torch_E_tensor = torch.from_numpy(energies)
-        
+
         torch_dataset = torchdata.TensorDataset(torch_E_tensor, torch_data_tensor)
 
         # Split into training and validation sets
@@ -226,7 +217,7 @@ class AutoencoderTrainer:
         train_dataset, val_dataset = torch.utils.data.random_split(
             torch_dataset, [nTrain, nVal]
         )
-        
+
         loader_train = torchdata.DataLoader(
             train_dataset, batch_size=self.config["BATCH"], shuffle=True
         )
@@ -237,81 +228,90 @@ class AutoencoderTrainer:
         del data, torch_data_tensor, torch_E_tensor, train_dataset, val_dataset
 
         return loader_train, loader_val
-    
-    def _create_checkpoint_folder(self, set_seed, take_subset) -> str:
-        """
-        Create and prepare checkpoint folder file path, which includes
-        info regarding learning rate and layer sizes.
-        """
-        learning_rate = float(self.args.learning_rate[0] if \
-                            self.args.learning_rate else self.config["LR"])
+
+    def _create_checkpoint_folder(self, set_seed: bool, take_subset: bool) -> str:
+        """Create and prepare checkpoint folder file path, which includes info regarding learning rate and layer sizes."""
+        learning_rate = float(
+            self.args.learning_rate[0] if self.args.learning_rate else self.config["LR"]
+        )
         subset = "subset" if take_subset else "full_data"
         random = "deterministic" if set_seed else "random"
-        checkpoint_folder = f"../ae_models/{subset}-{random}/" \
-                    f"{self.config['CHECKPOINT_NAME']}_{self.args.model}_" \
-                    f"{'-'.join(map(str, self.args.layer_sizes or []))}_" \
-                    f"{learning_rate}/"
+        checkpoint_folder = (
+            f"../ae_models/{subset}-{random}/"
+            f"{self.config['CHECKPOINT_NAME']}_{self.args.model}_"
+            f"{'-'.join(map(str, self.args.layer_sizes or []))}_"
+            f"{learning_rate}/"
+        )
         print("Checkpoint folder is at: ", checkpoint_folder)
-        
+
         # By default these arguments are None, so these blocks won't execute
         if self.args.save_folder_absolute:
-            checkpoint_folder = f"{self.args.save_folder_absolute}{checkpoint_folder[2:]}"
+            checkpoint_folder = (
+                f"{self.args.save_folder_absolute}{checkpoint_folder[2:]}"
+            )
         if self.args.save_folder_append:
             checkpoint_folder = f"{checkpoint_folder}{self.args.save_folder_append}/"
 
-        if not os.path.exists(checkpoint_folder):
-            os.makedirs(checkpoint_folder)
-            print(f"Checkpoint folder created at: {checkpoint_folder}")
+        checkpoint_folder_path = Path(checkpoint_folder)
+        if not checkpoint_folder_path.exists():
+            checkpoint_folder_path.mkdir(parents=True, exist_ok = True)
+
+        print(f"Checkpoint folder created at: {checkpoint_folder}")
 
         checkpoint = {}
-        checkpoint_path = os.path.join(checkpoint_folder, "checkpoint.pth")
-        
-        if self.args.load and os.path.exists(checkpoint_path):
+        checkpoint_path = Path(checkpoint_folder) / "checkpoint.pth"
+
+        if self.args.load and Path.exists(checkpoint_path):
             print(f"Loading training checkpoint from {checkpoint_path}", flush=True)
             checkpoint = torch.load(checkpoint_path, map_location=self.device)
             print(checkpoint.keys())
 
         self.checkpoint = checkpoint
         self.checkpoint_path = checkpoint_path
-        
+
         return checkpoint_folder
 
     def _setup_nn_embedding(self) -> Optional[NNConverter]:
-        """
-        Set up neural network embedding if required based on the SHOWER_EMBED
-        specified in the config file. The binning file is set to the CLI 
-        argument if provided, otherwise a default .xml for dataset 1 is used.
+        """Set up neural network embedding if required based on the SHOWER_EMBED specified in the config file.
+        
+        The binning file is set to the CLI argument if provided, otherwise a default .xml for dataset 1 is used.
         """
         if "NN" not in self.config.get("SHOWER_EMBED", ""):
             return None
-        
+
         dataset_num = self.config.get("DATASET_NUM", 2)
         if dataset_num == 1:
-            if self.args.binning_file is None: 
-                self.args.binning_file = "../CaloChallenge/code/binning_dataset_1_photons.xml"
+            if self.args.binning_file is None:
+                self.args.binning_file = (
+                    "../CaloChallenge/code/binning_dataset_1_photons.xml"
+                )
             bins = XMLHandler("photon", self.args.binning_file)
         else:
             if self.args.binning_file is None:
-                self.args.binning_file = "../CaloChallenge/code/binning_dataset_1_pions.xml"
+                self.args.binning_file = (
+                    "../CaloChallenge/code/binning_dataset_1_pions.xml"
+                )
             bins = XMLHandler("pion", self.args.binning_file)
-                
+
         NN_embed = NNConverter(bins=bins).to(device=self.device)
 
         return NN_embed
 
     def _initialize_model(self) -> CaloEnco:
-        """
-        Initialize the autoencoder model based on the SHOWER_EMBED, SHAPE_PAD,
-        SHAPE_ORIG, and NSTEPS in the config file. 
+        """Initialize the autoencoder model based on the SHOWER_EMBED, SHAPE_PAD, SHAPE_ORIG, and NSTEPS in the config file.
+
         Loads the model from checkpoints if possible.
         """
         if self.args.model != "AE":
             raise ValueError(f"Model {self.args.model} not supported!")
-            
+
         orig_shape = "orig" in self.config.get("SHOWER_EMBED", "")
-        shape = self.config["SHAPE_PAD"][1:] if not orig_shape \
+        shape = (
+            self.config["SHAPE_PAD"][1:]
+            if not orig_shape
             else self.config["SHAPE_ORIG"][1:]
-        
+        )
+
         model = CaloEnco(
             shape,
             config=self.config,
@@ -323,7 +323,7 @@ class AutoencoderTrainer:
             std_showers=None,
             E_bins=None,
             resnet_set=self.args.resnet_set,
-            layer_sizes=self.args.layer_sizes
+            layer_sizes=self.args.layer_sizes,
         ).to(device=self.device)
 
         # Load checkpoint if exists
@@ -332,99 +332,89 @@ class AutoencoderTrainer:
         elif len(self.checkpoint) > 1:
             model.load_state_dict(self.checkpoint)
 
-        # Backup files for model definition and config 
-        os.system(f"cp ae_models.py {self.checkpoint_folder}")
-        os.system(f"cp {self.args.config} {self.checkpoint_folder}")
-
         return model
 
     def _setup_training_components(
-            self
-            ) -> Tuple[
-                optim.Optimizer, 
-                optim.lr_scheduler._LRScheduler, 
-                Optional[EarlyStopper]]:
-        """
-        Set up optimizer, scheduler, and early stopping components for training.
-        """
-        learning_rate = float(self.args.learning_rate[0] if self.args.learning_rate \
-                            else self.config["LR"])
+        self,
+    ) -> tuple[
+        optim.Optimizer, optim.lr_scheduler._LRScheduler, Optional[EarlyStopper]
+    ]:
+        """Set up optimizer, scheduler, and early stopping components for training."""
+        learning_rate = float(
+            self.args.learning_rate[0] if self.args.learning_rate else self.config["LR"]
+        )
         optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, \
-                                                        factor=0.1,\
-                                                        patience=15, verbose=True)
-        
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, factor=0.1, patience=15, verbose=True
+        )
+
         # Load saved states if they exist
         if "optimizer_state_dict" in self.checkpoint and not self.args.reset_training:
             optimizer.load_state_dict(self.checkpoint["optimizer_state_dict"])
         if "scheduler_state_dict" in self.checkpoint and not self.args.reset_training:
             scheduler.load_state_dict(self.checkpoint["scheduler_state_dict"])
-        
+
         # Setup early stopping if enabled
         early_stopper = None
         if not self.args.no_early_stop:
             early_stopper = EarlyStopper(
-                patience=self.args.patience, 
-                mode="diff", 
-                min_delta=self.args.min_delta
+                patience=self.args.patience, mode="diff", min_delta=self.args.min_delta
             )
             if "early_stop_dict" in self.checkpoint and not self.args.reset_training:
                 early_stopper.__dict__ = self.checkpoint["early_stop_dict"]
-                
+
         return optimizer, scheduler, early_stopper
-    
+
     def _get_num_epochs(self) -> int:
-        """
-        Returns the number of epochs specified in the config file unless early
-        stopping is not enabled and there is a max_epochs set through the CLI 
-        args.
+        """Returns the number of epochs specified in the config file.
+        
+        Exception if early stopping is not enabled and there is a max_epochs set through the CLI args.
         """
         if self.args.no_early_stop and self.args.max_epochs:
             return self.args.max_epochs
-        
+
         return self.config["MAXEPOCH"]
 
     def _run_epoch(self, loader: DataLoader, training: bool = True) -> float:
-            """
-            Run one epoch of training or validation.
-            """
-            self.model.train() if training else self.model.eval()
-            total_loss = 0
-            
-            for E, data in tqdm(loader, unit="batch"):
-                if training:
-                    self.model.zero_grad()
-                    self.optimizer.zero_grad()
-                
-                data = data.to(device=self.device)
-                E = E.to(device=self.device)
-                
-                t = torch.randint(
-                    0, self.model.nsteps, (data.size()[0],), device=self.device
-                    ).long()
-                
-                batch_loss = self.model.compute_loss(
-                    data, E, t=t, loss_type="mse", 
-                    energy_loss_scale=self.config.get("ENERGY_LOSS_SCALE", 0.0)
-                )
-                
-                if training:
-                    batch_loss.backward()
-                    self.optimizer.step()
-                
-                total_loss += batch_loss.item()
-                del data, E, batch_loss
-                
-            return total_loss / len(loader)
+        """Run one epoch of training or validation."""
+        self.model.train() if training else self.model.eval()
+        total_loss = 0
+
+        for E, data in tqdm(loader, unit="batch"):
+            if training:
+                self.model.zero_grad()
+                self.optimizer.zero_grad()
+
+            data = data.to(device=self.device)
+            E = E.to(device=self.device)
+
+            t = torch.randint(
+                0, self.model.nsteps, (data.size()[0],), device=self.device
+            ).long()
+
+            batch_loss = self.model.compute_loss(
+                data,
+                E,
+                t=t,
+                loss_type="mse",
+                energy_loss_scale=self.config.get("ENERGY_LOSS_SCALE", 0.0),
+            )
+
+            if training:
+                batch_loss.backward()
+                self.optimizer.step()
+
+            total_loss += batch_loss.item()
+            del data, E, batch_loss
+
+        return total_loss / len(loader)
 
     def _train_epoch(self) -> float:
         """Train for one epoch and return average loss."""
         return self._run_epoch(self.train_loader, training=True)
 
-    def _validate_epoch(self) -> Tuple[float, float]:
-        """
-        Validate the model, return average loss and FPD score.
-        """
+    def _validate_epoch(self) -> tuple[float, float]:
+        """Validate the model, return average loss and FPD score."""
         self.model.eval()
         total_loss = 0
         all_real_features = []
@@ -443,8 +433,11 @@ class AutoencoderTrainer:
 
                 # Compute loss
                 batch_loss = self.model.compute_loss(
-                    data, E, t=t, loss_type="mse",
-                    energy_loss_scale=self.config.get("ENERGY_LOSS_SCALE", 0.0)
+                    data,
+                    E,
+                    t=t,
+                    loss_type="mse",
+                    energy_loss_scale=self.config.get("ENERGY_LOSS_SCALE", 0.0),
                 )
                 total_loss += batch_loss.item()
 
@@ -458,57 +451,60 @@ class AutoencoderTrainer:
 
         # Compute FPD
         fpd_val, fpd_err = jetnet.evaluation.fpd(
-            real_features=real_features.numpy(),
-            gen_features=gen_features.numpy()
+            real_features=real_features.numpy(), gen_features=gen_features.numpy()
         )
 
-        return total_loss / len(self.val_loader), fpd_val 
-
+        return total_loss / len(self.val_loader), fpd_val
 
     def _save_model(self, filename: str) -> None:
         """Save model state."""
-        print("Saving to %s" % self.checkpoint_folder, flush=True)
+        print(f"Saving to {self.checkpoint_folder}", flush=True)
         torch.save(
-            self.model.state_dict(),
-            os.path.join(self.checkpoint_folder, filename)
+            self.model.state_dict(), Path(self.checkpoint_folder)/ filename)
+
+    def _save_checkpoint(
+        self,
+        epoch: int,
+        training_losses: np.ndarray,
+        val_losses: np.ndarray,
+        fpd_scores: np.ndarray,
+    ) -> None:
+        """Save full training state, including FPD scores."""
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "scheduler_state_dict": self.scheduler.state_dict(),
+                "train_loss_hist": training_losses,
+                "val_loss_hist": val_losses,
+                "fpd_scores": fpd_scores,
+                "early_stop_dict": self.early_stopper.__dict__,
+            },
+            self.checkpoint_path,
         )
 
-    def _save_checkpoint(self, epoch: int, training_losses: np.ndarray,
-                        val_losses: np.ndarray, fpd_scores: np.ndarray) -> None:
-        """
-        Save full training state, including FPD scores.
-        """
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
-            'train_loss_hist': training_losses,
-            'val_loss_hist': val_losses,
-            'fpd_scores': fpd_scores,
-            'early_stop_dict': self.early_stopper.__dict__,
-        }, self.checkpoint_path)
-
-
     def _write_losses(self, loss_array: np.ndarray, filename: str) -> None:
-        """
-        Writes loss values & FPD scores into a .txt file.
-        """
-        with open(f"{self.checkpoint_folder}/{filename}_class.txt", "w") as fileout:
-            fileout.write("\n".join("{}".format(tl) for tl in loss_array) + "\n")
-
+        """Writes loss values & FPD scores into a .txt file."""
+        path = Path(self.checkpoint_folder) / filename
+        with path.open("w") as f:
+            for loss in loss_array:
+                f.write(f"{loss}\n")
 
     def train(self) -> None:
-        """
-        Train the model for specified number of epochs.
+        """Train the model for specified number of epochs.
+
         Logs validation losses and FPD scores.
         """
-
         # Compute initial validation loss & FPD
         with torch.no_grad():
             initial_loss, initial_fpd = self._validate_epoch()
 
-        training_losses, val_losses, fpd_scores = np.array([]), np.array([initial_loss]), np.array([initial_fpd])
+        training_losses, val_losses, fpd_scores = (
+            np.array([]),
+            np.array([initial_loss]),
+            np.array([initial_fpd]),
+        )
         start_epoch = 0
         min_validation_loss = 99999.0
         num_epochs = self._get_num_epochs()
@@ -539,7 +535,9 @@ class AutoencoderTrainer:
                 self._save_model("best_val.pth")
                 min_validation_loss = val_loss
 
-            if not self.args.no_early_stop and self.early_stopper.early_stop(val_loss - train_loss):
+            if not self.args.no_early_stop and self.early_stopper.early_stop(
+                val_loss - train_loss
+            ):
                 print("Early stopping!")
                 break
 
