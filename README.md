@@ -3,14 +3,10 @@ Due to the complex nature of our project and git repo not coming implemented wit
 from Tim on the final technical cleanup grading. Please select from the following files to grade on code readability and
 formatting, these are the files we worked on specifically in this quarter and should all pass `ruff check` and `ruff
 format`.  
-1. `/scripts/autoencoder/ae_hyper_explore/ae_layers_funcs.py`  
-2. `/scripts/autoencoder/ae_hyper_explore/dataset1_analysis.ipynb`  
-3. `/scripts/autoencoder/ae_hyper_explore/dataset2_analysis.ipynb`  
-4. `/scripts/autoencoder/ae_hyper_explore/LR_analysis.ipynb`  
-5. `/scripts/autoencoder/ae_models.py`  
-6. `/scripts/train_diffu_class.py`
-7. `/scripts/autoencoder/train_ae_class.py`
-8. `/scripts/ae_eval_fpd.py`
+1. `/scripts/autoencoder/ae_models.py`  
+2. `/scripts/train_diffu_class.py`
+3. `/scripts/autoencoder/train_ae_class.py`
+4. `/scripts/ae_eval_fpd.py`
 
 # DSI Clinic Initial Week
 
